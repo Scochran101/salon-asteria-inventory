@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Salon Asteria Inventory</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-[#FAF8F5] text-[#2D2A32] select-none" style="-webkit-tap-highlight-color: transparent;">
+
+<!-- ==================== PIN SCREEN ==================== -->
+<div id="pin-screen" class="hidden fixed inset-0 bg-[#2D2A32] z-50 flex items-center justify-center p-6">
+  <div class="w-full max-w-xs text-center">
+    <div class="text-[#C4A265] text-3xl font-serif tracking-widest mb-1">SALON ASTERIA</div>
+    <div class="text-white/50 text-sm mb-8 tracking-wide">Inventory</div>
+    <div id="pin-dots" class="flex justify-center gap-4 mb-8"></div>
+    <div id="pin-error" class="text-red-400 text-sm mb-4 h-5"></div>
+    <div class="grid grid-cols-3 gap-3">
+      <button onclick="pinDigit('1')" class="pin-key">1</button>
+      <button onclick="pinDigit('2')" class="pin-key">2</button>
+      <button onclick="pinDigit('3')" class="pin-key">3</button>
+      <button onclick="pinDigit('4')" class="pin-key">4</button>
+      <button onclick="pinDigit('5')" class="pin-key">5</button>
+      <button onclick="pinDigit('6')" class="pin-key">6</button>
+      <button onclick="pinDigit('7')" class="pin-key">7</button>
+      <button onclick="pinDigit('8')" class="pin-key">8</button>
+      <button onclick="pinDigit('9')" class="pin-key">9</button>
+      <div></div>
+      <button onclick="pinDigit('0')" class="pin-key">0</button>
+      <button onclick="pinBack()" class="pin-key text-2xl">⌫</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== LOADING OVERLAY ==================== -->
+<div id="loading" class="hidden fixed inset-0 bg-[#FAF8F5] z-40 flex flex-col items-center justify-center">
+  <div class="w-10 h-10 border-4 border-[#C4A265] border-t-transparent rounded-full animate-spin mb-4"></div>
+  <div class="text-[#8A8580] text-sm">Loading inventory…</div>
+</div>
+
+<!-- ==================== APP ==================== -->
+<div id="app" class="hidden">
+  <div class="max-w-2xl mx-auto pb-28">
+    <header class="sticky top-0 bg-[#FAF8F5]/95 backdrop-blur z-20 px-4 pt-4 pb-2 flex items-center justify-between">
+      <div>
+        <div class="font-serif text-xl tracking-wide">Salon Asteria</div>
+        <div id="header-sub" class="text-xs text-[#8A8580]"></div>
+      </div>
+      <div class="flex items-center gap-2">
+        <div id="save-status" class="text-xs text-[#8A8580] transition-opacity opacity-0">Saving…</div>
+        <button onclick="refreshData()" class="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-lg">↻</button>
+      </div>
+    </header>
+    <main id="view" class="px-4 pt-2"></main>
+  </div>
+
+  <!-- Bottom navigation -->
+  <nav class="fixed bottom-0 left-0 right-0 bg-white border-t border-[#EDE8E1] z-30">
+    <div class="max-w-2xl mx-auto grid grid-cols-5">
+      <button onclick="go('count')" id="nav-count" class="nav-btn"><span class="text-xl">✓</span><span>Count</span></button>
+      <button onclick="go('browse')" id="nav-browse" class="nav-btn"><span class="text-xl">🔍</span><span>Browse</span></button>
+      <button onclick="go('restock')" id="nav-restock" class="nav-btn"><span class="text-xl">📦</span><span>Restock</span></button>
+      <button onclick="go('order')" id="nav-order" class="nav-btn"><span class="text-xl">🛒</span><span>Order</span></button>
+      <button onclick="go('more')" id="nav-more" class="nav-btn"><span class="text-xl">⋯</span><span>More</span></button>
+    </div>
+  </nav>
+</div>
+
+<!-- Modal + toast containers -->
+<div id="modal-wrap" class="hidden fixed inset-0 bg-black/40 z-40 flex items-end sm:items-center justify-center" onclick="if(event.target===this)closeModal()">
+  <div id="modal-box" class="bg-white w-full max-w-lg rounded-t-2xl sm:rounded-2xl p-5 max-h-[85vh] overflow-y-auto"></div>
+</div>
+<div id="toast" class="hidden fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl text-sm text-white shadow-lg"></div>
+
+<style type="text/tailwindcss">
+  .pin-key{ @apply bg-white/10 text-white text-xl font-semibold rounded-2xl h-16 active:bg-white/25; }
+  .nav-btn{ @apply flex flex-col items-center gap-0.5 py-2.5 text-[11px] text-[#8A8580]; }
+  .nav-btn.active{ @apply text-[#2D2A32] font-semibold; }
+  .card{ @apply bg-white rounded-2xl shadow-sm; }
+  .btn-gold{ @apply bg-[#C4A265] text-white font-semibold rounded-xl active:opacity-80; }
+  .btn-dark{ @apply bg-[#2D2A32] text-white font-semibold rounded-xl active:opacity-80; }
+  .btn-ghost{ @apply bg-[#F1EDE7] text-[#2D2A32] font-semibold rounded-xl active:opacity-70; }
+  .stepper{ @apply w-11 h-11 rounded-xl bg-[#F1EDE7] text-xl font-bold flex items-center justify-center active:bg-[#E3DCD2]; }
+  .field{ @apply w-full border border-[#E3DCD2] rounded-xl px-3 py-2.5 text-base bg-white focus:outline-none focus:ring-2 focus:ring-[#C4A265]; }
+  .chip{ @apply px-3 py-1.5 rounded-full text-sm bg-white border border-[#E3DCD2] whitespace-nowrap; }
+  .chip.active{ @apply bg-[#2D2A32] text-white border-[#2D2A32]; }
+  input, select, textarea { user-select: text; -webkit-user-select: text; }
+</style>
+
+<script>
+/* ============================================================
+ * SALON ASTERIA INVENTORY — FRONT END
+ * Backend: Google Apps Script Web App (see SCRIPT_URL)
+ * ============================================================ */
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyMzTwGQCjIyJZ5q6bo2-kmL_wrdVpgzEJM7C6izC8lsdBzv5gF6iXuwcJKL793EZ_2/exec';
+
+const CATEGORIES = ['Retail','Back Bar','Color','Developer','Bleach & Treatment','Supplies'];
+
+// ---------- App state ----------
+let S = {
+  token: localStorage.getItem('asteria_token') || null,
+  products: [], zones: [], counts: [], snapshots: [], restocks: [],
+  view: 'count', zoneId: null,
+  countSearch: '', browseSearch: '', browseCat: 'All', restockSearch: '',
+  touched: {},           // productId|zoneId keys touched this session
+  report: null, pending: 0
+};
+let pin = '';
+const debounces = {};
+
+// ---------- API ----------
+async function apiGet(action, params) {
+  const q = new URLSearchParams(Object.assign({ action: action, token: S.token }, params || {}));
+  const res = await fetch(SCRIPT_URL + '?' + q.toString());
+  const data = await res.json();
+  if (data.error === 'AUTH') { logout(); throw new Error('AUTH'); }
+  if (data.error) throw new Error(data.error);
+  return data;
+}
+async function apiPost(action, data) {
+  setSaving(1);
+  try {
+    const res = await fetch(SCRIPT_URL, { method: 'POST', body: JSON.stringify({ token: S.token, action: action, data: data }) });
+    const out = await res.json();
+    if (out.error === 'AUTH') { logout(); throw new Error('AUTH'); }
+    if (out.error) throw new Error(out.error);
+    return out;
+  } catch (err) {
+    if (err.message !== 'AUTH') toast('Couldn’t save — check connection', true);
+    throw err;
+  } finally { setSaving(-1); }
+}
+function setSaving(d) {
+  S.pending += d;
+  const el = document.getElementById('save-status');
+  el.textContent = S.pending > 0 ? 'Saving…' : 'Saved ✓';
+  el.classList.remove('opacity-0');
+  if (S.pending <= 0) { S.pending = 0; setTimeout(() => { if (S.pending === 0) el.classList.add('opacity-0'); }, 1200); }
+}
+
+// ---------- PIN ----------
+function renderPinDots() {
+  document.getElementById('pin-dots').innerHTML = [0,1,2,3].map(i =>
+    `<div class="w-4 h-4 rounded-full ${i < pin.length ? 'bg-[#C4A265]' : 'bg-white/20'}"></div>`).join('');
+}
+function pinDigit(d) {
+  if (pin.length >= 4) return;
+  pin += d; renderPinDots();
+  if (pin.length === 4) submitPin();
+}
+function pinBack() { pin = pin.slice(0, -1); renderPinDots(); document.getElementById('pin-error').textContent = ''; }
+async function submitPin() {
+  try {
+    const res = await fetch(SCRIPT_URL + '?action=login&password=' + encodeURIComponent(pin));
+    const out = await res.json();
+    if (out.success) {
+      S.token = out.token; localStorage.setItem('asteria_token', out.token);
+      document.getElementById('pin-screen').classList.add('hidden');
+      boot();
+    } else {
+      document.getElementById('pin-error').textContent = 'Wrong PIN — try again';
+      pin = ''; renderPinDots();
+    }
+  } catch (e) {
+    document.getElementById('pin-error').textContent = 'Connection error — try again';
+    pin = ''; renderPinDots();
+  }
+}
+function logout() {
+  localStorage.removeItem('asteria_token'); S.token = null; pin = '';
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('loading').classList.add('hidden');
+  document.getElementById('pin-screen').classList.remove('hidden');
+  renderPinDots();
+}
+
+// ---------- Boot ----------
+async function boot() {
+  document.getElementById('loading').classList.remove('hidden');
+  try {
+    const d = await apiGet('boot');
+    S.products = d.products; S.zones = d.zones; S.counts = d.counts;
+    S.snapshots = d.snapshots; S.restocks = d.restocks;
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+    render();
+  } catch (e) {
+    document.getElementById('loading').classList.add('hidden');
+    if (e.message !== 'AUTH') { toast('Couldn’t load — tap ↻ to retry', true); document.getElementById('app').classList.remove('hidden'); }
+  }
+}
+async function refreshData() { await boot(); toast('Up to date'); }
+
+// ---------- Data helpers ----------
+const activeProducts = () => S.products.filter(p => p.Active === 'Y');
+const activeZones = () => S.zones.filter(z => z.Active === 'Y').sort((a,b) => Number(a.SortOrder) - Number(b.SortOrder));
+const zoneName = id => { const z = S.zones.find(z => z.ZoneID === id); return z ? z.Name : id; };
+const countRow = (pid, zid) => S.counts.find(c => c.ProductID === pid && c.ZoneID === zid);
+const zoneEntries = zid => S.counts.filter(c => c.ZoneID === zid)
+  .map(c => ({ c: c, p: S.products.find(p => p.ProductID === c.ProductID) }))
+  .filter(x => x.p && x.p.Active === 'Y');
+const totalFor = pid => S.counts.filter(c => c.ProductID === pid).reduce((s,c) => s + (Number(c.Qty) || 0), 0);
+const fmtQty = q => { const n = Number(q) || 0; return (n % 1 === 0) ? String(n) : n.toFixed(1).replace('.5','½').replace(/^0½$/,'½'); };
+const fmtDate = iso => iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
+const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+function prodName(p) { return [p.Shade, p.SubType && !p.Shade ? p.SubType : '', !p.Shade && !p.SubType ? p.Line : ''].filter(Boolean).join(' ') || p.Brand || '(unnamed)'; }
+function prodSub(p) { return [p.Brand, p.Line, p.Shade ? p.SubType : ''].filter(Boolean).join(' · '); }
+function prodFull(p) { return [p.Brand, p.Line, p.SubType, p.Shade].filter(Boolean).join(' '); }
+function matches(p, q) { return prodFull(p).toLowerCase().includes(q.toLowerCase()); }
+function lastSnapshot() {
+  const closed = S.snapshots.filter(s => s.Status === 'closed').sort((a,b) => Number(a.SnapshotID) - Number(b.SnapshotID));
+  return closed.length ? closed[closed.length - 1] : null;
+}
+function groupSort(list) { // group entries by Brand—Line for display
+  const groups = {};
+  list.forEach(x => {
+    const key = [x.p.Category, x.p.Brand, x.p.Line, x.p.Shade ? x.p.SubType : ''].filter(Boolean).join(' — ') || 'Other';
+    (groups[key] = groups[key] || []).push(x);
+  });
+  return Object.keys(groups).sort().map(k => ({ label: k, items: groups[k].sort((a,b) =>
+    prodName(a.p).localeCompare(prodName(b.p), undefined, { numeric: true, sensitivity: 'base' })) }));
+}
+
+// ---------- Navigation / render ----------
+function go(view, zoneId) {
+  S.view = view; if (zoneId !== undefined) S.zoneId = zoneId;
+  S.countSearch = ''; render();
+  window.scrollTo(0, 0);
+}
+function render() {
+  const navMap = { count: 'count', zone: 'count', browse: 'browse', restock: 'restock', order: 'order', more: 'more', report: 'more', zones: 'more' };
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  const nb = document.getElementById('nav-' + (navMap[S.view] || 'count'));
+  if (nb) nb.classList.add('active');
+  const v = document.getElementById('view');
+  const sub = document.getElementById('header-sub');
+  const last = lastSnapshot();
+  sub.textContent = last ? 'Last full count: ' + fmtDate(last.Date) : '';
+  if (S.view === 'count') v.innerHTML = viewCount();
+  else if (S.view === 'zone') v.innerHTML = viewZone();
+  else if (S.view === 'browse') v.innerHTML = viewBrowse();
+  else if (S.view === 'restock') v.innerHTML = viewRestock();
+  else if (S.view === 'order') v.innerHTML = viewOrder();
+  else if (S.view === 'more') v.innerHTML = viewMore();
+  else if (S.view === 'zones') v.innerHTML = viewZones();
+  else if (S.view === 'report') { v.innerHTML = '<div class="text-center text-[#8A8580] py-10">Building report…</div>'; loadReport(); }
+}
+
+/* ==================== COUNT: zone picker ==================== */
+function viewCount() {
+  const zones = activeZones().map(z => {
+    const entries = zoneEntries(z.ZoneID);
+    const touched = entries.filter(x => S.touched[x.p.ProductID + '|' + z.ZoneID]).length;
+    return `<button onclick="go('zone','${z.ZoneID}')" class="card w-full p-4 flex items-center justify-between mb-3 text-left active:bg-[#FDFCFA]">
+      <div>
+        <div class="font-semibold text-lg">${esc(z.Name)}</div>
+        <div class="text-sm text-[#8A8580]">${entries.length} products${touched ? ` · <span class="text-[#5B8A5B]">${touched} counted this session</span>` : ''}</div>
+      </div>
+      <div class="text-2xl text-[#C4A265]">›</div>
+    </button>`;
+  }).join('');
+  return `
+    <h2 class="text-lg font-semibold mb-1">Where are you standing?</h2>
+    <p class="text-sm text-[#8A8580] mb-4">Pick a zone and count what you see. When the whole walk is done, finish the count below.</p>
+    ${zones}
+    <button onclick="confirmFinish()" class="btn-dark w-full py-4 mt-4 text-base">Finish Count — Save Snapshot</button>
+    <p class="text-xs text-[#8A8580] text-center mt-2">This freezes today's numbers and starts a fresh usage period.</p>`;
+}
+
+/* ==================== COUNT: inside a zone ==================== */
+function viewZone() {
+  const zid = S.zoneId;
+  const q = S.countSearch.trim();
+  let body = '';
+  if (q) {
+    const inZone = new Set(zoneEntries(zid).map(x => x.p.ProductID));
+    const results = activeProducts().filter(p => matches(p, q)).slice(0, 30);
+    body = results.map(p => {
+      if (inZone.has(p.ProductID)) return rowHTML(p, zid);
+      const elsewhere = S.counts.filter(c => c.ProductID === p.ProductID && Number(c.Qty) > 0)
+        .map(c => zoneName(c.ZoneID) + ' ' + fmtQty(c.Qty)).join(', ');
+      return `<div class="card p-3 mb-2 flex items-center justify-between">
+        <div class="min-w-0 mr-2">
+          <div class="font-medium">${esc(prodName(p))}</div>
+          <div class="text-xs text-[#8A8580]">${esc(prodSub(p))}${elsewhere ? ' · also in ' + esc(elsewhere) : ''}</div>
+        </div>
+        <button onclick="addHere('${p.ProductID}')" class="btn-gold px-4 py-2.5 text-sm shrink-0">Add here</button>
+      </div>`;
+    }).join('');
+    body += `<button onclick="openAddProduct('${zid}')" class="btn-ghost w-full py-3.5 mt-2">＋ New product “${esc(q)}”</button>`;
+    if (!results.length) body = `<div class="text-center text-[#8A8580] py-6">Nothing matches “${esc(q)}”</div>` + body;
+  } else {
+    const groups = groupSort(zoneEntries(zid));
+    body = groups.map(g => `
+      <div class="text-xs font-semibold text-[#8A8580] uppercase tracking-wider mt-4 mb-1.5 px-1">${esc(g.label)}</div>
+      ${g.items.map(x => rowHTML(x.p, zid)).join('')}`).join('') ||
+      '<div class="text-center text-[#8A8580] py-10">Nothing here yet — search above to add products to this zone.</div>';
+  }
+  return `
+    <div class="flex items-center gap-2 mb-3">
+      <button onclick="go('count')" class="w-10 h-10 rounded-full bg-white shadow-sm text-lg shrink-0">‹</button>
+      <h2 class="text-lg font-semibold">${esc(zoneName(zid))}</h2>
+    </div>
+    <input class="field mb-1" placeholder="Search anything — add it to this zone" value="${esc(q)}"
+      oninput="S.countSearch=this.value; rerenderZoneBody()" id="zone-search">
+    <div id="zone-body">${body}</div>`;
+}
+function rerenderZoneBody() {
+  const el = document.getElementById('zone-search');
+  const pos = el.selectionStart;
+  const html = viewZone();
+  document.getElementById('view').innerHTML = html;
+  const el2 = document.getElementById('zone-search');
+  el2.focus(); el2.setSelectionRange(pos, pos);
+}
+function rowHTML(p, zid) {
+  const c = countRow(p.ProductID, zid);
+  const qty = c ? Number(c.Qty) || 0 : 0;
+  const touched = S.touched[p.ProductID + '|' + zid];
+  const verify = p.Verify === 'Y' ? `<button onclick="openVerify('${p.ProductID}')" class="w-6 h-6 rounded-full bg-amber-100 text-amber-600 text-xs shrink-0 mr-1.5" title="Needs verification">!</button>` : '';
+  return `<div class="card p-3 mb-2 flex items-center">
+    ${verify}
+    <div class="min-w-0 flex-1 mr-2" onclick="openEditProduct('${p.ProductID}')">
+      <div class="font-medium truncate">${esc(prodName(p))} ${touched ? '<span class="text-[#5B8A5B]">✓</span>' : ''}</div>
+      <div class="text-xs text-[#8A8580] truncate">${esc(prodSub(p))}</div>
+    </div>
+    <button class="stepper" onclick="bump('${p.ProductID}','${zid}',-1)" ${qty <= 0 ? 'disabled style="opacity:.3"' : ''}>−</button>
+    <button onclick="openQtyPad('${p.ProductID}','${zid}')" class="w-14 text-center text-lg font-semibold" id="qty-${p.ProductID}-${zid}">${fmtQty(qty)}</button>
+    <button class="stepper" onclick="bump('${p.ProductID}','${zid}',1)">＋</button>
+  </div>`;
+}
+
+// Adjusts a count and saves it (debounced per product+zone)
+function bump(pid, zid, delta) {
+  const c = countRow(pid, zid);
+  let qty = (c ? Number(c.Qty) || 0 : 0) + delta;
+  if (qty < 0) qty = 0;
+  setLocalCount(pid, zid, qty);
+}
+function setLocalCount(pid, zid, qty) {
+  qty = Math.round(qty * 2) / 2;
+  let c = countRow(pid, zid);
+  if (c) c.Qty = qty; else S.counts.push({ ProductID: pid, ZoneID: zid, Qty: qty, LastUpdated: '' });
+  S.touched[pid + '|' + zid] = true;
+  const el = document.getElementById('qty-' + pid + '-' + zid);
+  if (el) el.textContent = fmtQty(qty);
+  if (S.view === 'zone' && !S.countSearch) { document.getElementById('zone-body').innerHTML = null; rerenderZoneBodyStatic(); }
+  const key = pid + '|' + zid;
+  clearTimeout(debounces[key]);
+  debounces[key] = setTimeout(() => apiPost('setCount', { productId: pid, zoneId: zid, qty: qty }).catch(()=>{}), 400);
+}
+function rerenderZoneBodyStatic() {
+  const groups = groupSort(zoneEntries(S.zoneId));
+  document.getElementById('zone-body').innerHTML = groups.map(g => `
+    <div class="text-xs font-semibold text-[#8A8580] uppercase tracking-wider mt-4 mb-1.5 px-1">${esc(g.label)}</div>
+    ${g.items.map(x => rowHTML(x.p, S.zoneId)).join('')}`).join('');
+}
+function addHere(pid) {
+  setLocalCount(pid, S.zoneId, 1);
+  S.countSearch = ''; render();
+  toast('Added to ' + zoneName(S.zoneId));
+}
+
+// Quick quantity pad for a product in a zone
+function openQtyPad(pid, zid) {
+  const p = S.products.find(p => p.ProductID === pid);
+  const quick = [0, 0.5, 1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
+  showModal(`
+    <div class="font-semibold text-lg mb-0.5">${esc(prodName(p))}</div>
+    <div class="text-sm text-[#8A8580] mb-4">${esc(prodSub(p))} · ${esc(zoneName(zid))}</div>
+    <div class="grid grid-cols-4 gap-2 mb-3">
+      ${quick.map(n => `<button onclick="setLocalCount('${pid}','${zid}',${n});closeModal()" class="btn-ghost py-3.5 text-lg">${fmtQty(n)}</button>`).join('')}
+    </div>
+    <div class="flex gap-2">
+      <input id="qty-custom" type="number" step="0.5" min="0" inputmode="decimal" class="field" placeholder="Other amount">
+      <button onclick="const v=document.getElementById('qty-custom').value; if(v!==''){setLocalCount('${pid}','${zid}',Number(v));closeModal()}" class="btn-gold px-5">Set</button>
+    </div>
+    <button onclick="removeFromZoneUI('${pid}','${zid}')" class="w-full text-center text-sm text-[#8B2D3A] mt-4">Remove from this zone</button>`);
+}
+async function removeFromZoneUI(pid, zid) {
+  closeModal();
+  S.counts = S.counts.filter(c => !(c.ProductID === pid && c.ZoneID === zid));
+  render();
+  try { await apiPost('removeFromZone', { productId: pid, zoneId: zid }); toast('Removed'); } catch (e) {}
+}
+
+/* ==================== VERIFY ==================== */
+function openVerify(pid) {
+  const p = S.products.find(p => p.ProductID === pid);
+  showModal(`
+    <div class="font-semibold text-lg mb-1">Verify: ${esc(prodFull(p))}</div>
+    <div class="text-sm text-[#8A8580] mb-4">${esc(p.Notes || 'Transcribed from handwritten notes — double-check details.')}</div>
+    <label class="text-sm font-medium">Price (fix if wrong)</label>
+    <input id="verify-price" type="number" step="0.01" inputmode="decimal" class="field mt-1 mb-4" value="${p.Price !== '' ? esc(p.Price) : ''}" placeholder="No price on file">
+    <div class="flex gap-2">
+      <button onclick="closeModal();openEditProduct('${pid}')" class="btn-ghost flex-1 py-3.5">Edit details</button>
+      <button onclick="markVerified('${pid}')" class="btn-gold flex-1 py-3.5">Looks right ✓</button>
+    </div>`);
+}
+async function markVerified(pid) {
+  const price = document.getElementById('verify-price').value;
+  const p = S.products.find(p => p.ProductID === pid);
+  p.Verify = ''; if (price !== '') p.Price = Number(price);
+  closeModal(); render();
+  try {
+    const d = { productId: pid, verify: false };
+    if (price !== '') d.price = Number(price);
+    await apiPost('updateProduct', d); toast('Verified ✓');
+  } catch (e) {}
+}
+
+/* ==================== ADD / EDIT PRODUCT ==================== */
+function datalist(id, values) {
+  return `<datalist id="${id}">${[...new Set(values.filter(Boolean))].sort().map(v => `<option value="${esc(v)}">`).join('')}</datalist>`;
+}
+function openAddProduct(zoneId) {
+  const zid = zoneId || (activeZones()[0] || {}).ZoneID;
+  const guess = S.countSearch.trim();
+  showModal(`
+    <div class="font-semibold text-lg mb-4">New product</div>
+    <div class="grid grid-cols-2 gap-3">
+      <div class="col-span-2"><label class="text-sm font-medium">Category</label>
+        <select id="np-cat" class="field mt-1">${CATEGORIES.map(c => `<option>${c}</option>`).join('')}</select></div>
+      <div><label class="text-sm font-medium">Brand</label>
+        <input id="np-brand" class="field mt-1" list="dl-brand" value="${esc(guess)}">${datalist('dl-brand', S.products.map(p => p.Brand))}</div>
+      <div><label class="text-sm font-medium">Line</label>
+        <input id="np-line" class="field mt-1" list="dl-line">${datalist('dl-line', S.products.map(p => p.Line))}</div>
+      <div><label class="text-sm font-medium">Type</label>
+        <input id="np-sub" class="field mt-1" list="dl-sub">${datalist('dl-sub', S.products.map(p => p.SubType))}</div>
+      <div><label class="text-sm font-medium">Shade / Variant</label><input id="np-shade" class="field mt-1"></div>
+      <div><label class="text-sm font-medium">Price ($)</label><input id="np-price" type="number" step="0.01" inputmode="decimal" class="field mt-1"></div>
+      <div><label class="text-sm font-medium">Par (reorder at)</label><input id="np-par" type="number" step="0.5" inputmode="decimal" class="field mt-1" value="1"></div>
+      <div><label class="text-sm font-medium">Zone</label>
+        <select id="np-zone" class="field mt-1">${activeZones().map(z => `<option value="${z.ZoneID}" ${z.ZoneID === zid ? 'selected' : ''}>${esc(z.Name)}</option>`).join('')}</select></div>
+      <div><label class="text-sm font-medium">How many here now</label><input id="np-qty" type="number" step="0.5" inputmode="decimal" class="field mt-1" value="1"></div>
+      <div class="col-span-2"><label class="text-sm font-medium">Notes</label><input id="np-notes" class="field mt-1"></div>
+    </div>
+    <button onclick="saveNewProduct()" class="btn-gold w-full py-4 mt-4">Add product</button>`);
+}
+async function saveNewProduct() {
+  const g = id => document.getElementById(id).value.trim();
+  const d = { category: g('np-cat'), brand: g('np-brand'), line: g('np-line'), subType: g('np-sub'),
+    shade: g('np-shade'), price: g('np-price') !== '' ? Number(g('np-price')) : '', par: Number(g('np-par') || 1),
+    notes: g('np-notes'), zoneId: g('np-zone'), qty: Number(g('np-qty') || 0) };
+  if (!d.brand && !d.line && !d.shade) { toast('Give it at least a brand or a name', true); return; }
+  closeModal();
+  try {
+    const out = await apiPost('addProduct', d);
+    S.products.push({ ProductID: out.productId, Category: d.category, Brand: d.brand, Line: d.line, SubType: d.subType,
+      Shade: d.shade, Par: d.par, Price: d.price, Verify: '', Notes: d.notes, Active: 'Y' });
+    S.counts.push({ ProductID: out.productId, ZoneID: d.zoneId, Qty: d.qty, LastUpdated: '' });
+    S.touched[out.productId + '|' + d.zoneId] = true;
+    render(); toast('Added ✓');
+  } catch (e) {}
+}
+function openEditProduct(pid) {
+  const p = S.products.find(p => p.ProductID === pid);
+  const inZones = S.counts.filter(c => c.ProductID === pid).map(c => `${esc(zoneName(c.ZoneID))}: <b>${fmtQty(c.Qty)}</b>`).join(' · ');
+  showModal(`
+    <div class="font-semibold text-lg mb-1">Edit product</div>
+    <div class="text-sm text-[#8A8580] mb-4">${inZones || 'Not placed in any zone yet'}</div>
+    <div class="grid grid-cols-2 gap-3">
+      <div class="col-span-2"><label class="text-sm font-medium">Category</label>
+        <select id="ep-cat" class="field mt-1">${CATEGORIES.map(c => `<option ${p.Category === c ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
+      <div><label class="text-sm font-medium">Brand</label><input id="ep-brand" class="field mt-1" value="${esc(p.Brand)}"></div>
+      <div><label class="text-sm font-medium">Line</label><input id="ep-line" class="field mt-1" value="${esc(p.Line)}"></div>
+      <div><label class="text-sm font-medium">Type</label><input id="ep-sub" class="field mt-1" value="${esc(p.SubType)}"></div>
+      <div><label class="text-sm font-medium">Shade / Variant</label><input id="ep-shade" class="field mt-1" value="${esc(p.Shade)}"></div>
+      <div><label class="text-sm font-medium">Price ($)</label><input id="ep-price" type="number" step="0.01" inputmode="decimal" class="field mt-1" value="${p.Price !== '' ? esc(p.Price) : ''}"></div>
+      <div><label class="text-sm font-medium">Par (reorder at)</label><input id="ep-par" type="number" step="0.5" inputmode="decimal" class="field mt-1" value="${esc(p.Par)}"></div>
+      <div class="col-span-2"><label class="text-sm font-medium">Notes</label><input id="ep-notes" class="field mt-1" value="${esc(p.Notes)}"></div>
+      <div class="col-span-2 flex items-center gap-2 mt-1">
+        <input type="checkbox" id="ep-verify" class="w-5 h-5" ${p.Verify === 'Y' ? 'checked' : ''}>
+        <label for="ep-verify" class="text-sm">Still needs verification</label>
+      </div>
+    </div>
+    <button onclick="saveEditProduct('${pid}')" class="btn-gold w-full py-4 mt-4">Save changes</button>
+    <button onclick="archiveProduct('${pid}')" class="w-full text-center text-sm text-[#8B2D3A] mt-3">Archive this product (hide everywhere)</button>`);
+}
+async function saveEditProduct(pid) {
+  const g = id => document.getElementById(id).value.trim();
+  const p = S.products.find(p => p.ProductID === pid);
+  const d = { productId: pid, category: g('ep-cat'), brand: g('ep-brand'), line: g('ep-line'), subType: g('ep-sub'),
+    shade: g('ep-shade'), par: Number(g('ep-par') || 1), notes: g('ep-notes'),
+    verify: document.getElementById('ep-verify').checked };
+  if (g('ep-price') !== '') d.price = Number(g('ep-price'));
+  Object.assign(p, { Category: d.category, Brand: d.brand, Line: d.line, SubType: d.subType, Shade: d.shade,
+    Par: d.par, Notes: d.notes, Verify: d.verify ? 'Y' : '' });
+  if (d.price !== undefined) p.Price = d.price;
+  closeModal(); render();
+  try { await apiPost('updateProduct', d); toast('Saved ✓'); } catch (e) {}
+}
+async function archiveProduct(pid) {
+  if (!confirm('Hide this product from the app? Its history is kept in the sheet.')) return;
+  const p = S.products.find(p => p.ProductID === pid);
+  p.Active = ''; closeModal(); render();
+  try { await apiPost('updateProduct', { productId: pid, active: false }); toast('Archived'); } catch (e) {}
+}
+
+/* ==================== BROWSE ==================== */
+function viewBrowse() {
+  const q = S.browseSearch.trim();
+  let list = activeProducts();
+  if (S.browseCat !== 'All') list = list.filter(p => p.Category === S.browseCat);
+  if (q) list = list.filter(p => matches(p, q));
+  const groups = groupSort(list.map(p => ({ p: p })));
+  const cats = ['All'].concat(CATEGORIES);
+  return `
+    <input class="field mb-2" placeholder="Search all products" value="${esc(q)}" id="browse-search"
+      oninput="S.browseSearch=this.value; rerenderKeepFocus('browse-search')">
+    <div class="flex gap-2 overflow-x-auto pb-2 mb-1 -mx-4 px-4">
+      ${cats.map(c => `<button class="chip ${S.browseCat === c ? 'active' : ''}" onclick="S.browseCat='${c}';render()">${c}</button>`).join('')}
+    </div>
+    <button onclick="openAddProduct()" class="btn-gold w-full py-3.5 mb-3">＋ Add a new product</button>
+    ${groups.map(g => `
+      <div class="text-xs font-semibold text-[#8A8580] uppercase tracking-wider mt-4 mb-1.5 px-1">${esc(g.label)}</div>
+      ${g.items.map(x => {
+        const t = totalFor(x.p.ProductID);
+        const below = t < Number(x.p.Par || 0);
+        const zs = S.counts.filter(c => c.ProductID === x.p.ProductID && Number(c.Qty) > 0).map(c => zoneName(c.ZoneID)).join(', ');
+        return `<div class="card p-3 mb-2 flex items-center" onclick="openEditProduct('${x.p.ProductID}')">
+          ${x.p.Verify === 'Y' ? '<div class="w-2.5 h-2.5 rounded-full bg-amber-400 mr-2 shrink-0"></div>' : ''}
+          <div class="min-w-0 flex-1 mr-2">
+            <div class="font-medium truncate">${esc(prodName(x.p))}</div>
+            <div class="text-xs text-[#8A8580] truncate">${esc(prodSub(x.p))}${zs ? ' · ' + esc(zs) : ''}</div>
+          </div>
+          <div class="text-right shrink-0">
+            <div class="text-lg font-semibold ${below ? 'text-[#8B2D3A]' : ''}">${fmtQty(t)}</div>
+            ${below ? '<div class="text-[10px] text-[#8B2D3A] font-semibold">BELOW PAR</div>' : ''}
+          </div>
+        </div>`;
+      }).join('')}`).join('') || '<div class="text-center text-[#8A8580] py-10">No matches.</div>'}`;
+}
+function rerenderKeepFocus(id) {
+  const el = document.getElementById(id); const pos = el.selectionStart;
+  render();
+  const el2 = document.getElementById(id);
+  if (el2) { el2.focus(); el2.setSelectionRange(pos, pos); }
+}
+
+/* ==================== RESTOCK ==================== */
+function viewRestock() {
+  const q = S.restockSearch.trim();
+  const results = q ? activeProducts().filter(p => matches(p, q)).slice(0, 20) : [];
+  const recent = [...S.restocks].reverse().slice(0, 12);
+  return `
+    <h2 class="text-lg font-semibold mb-1">Restock</h2>
+    <p class="text-sm text-[#8A8580] mb-3">Just unpacked an order? Log what arrived — takes seconds, keeps usage numbers honest.</p>
+    <input class="field mb-2" placeholder="Search the product that arrived" value="${esc(q)}" id="restock-search"
+      oninput="S.restockSearch=this.value; rerenderKeepFocus('restock-search')">
+    ${results.map(p => `
+      <div class="card p-3 mb-2 flex items-center justify-between">
+        <div class="min-w-0 mr-2">
+          <div class="font-medium truncate">${esc(prodName(p))}</div>
+          <div class="text-xs text-[#8A8580] truncate">${esc(prodSub(p))} · have ${fmtQty(totalFor(p.ProductID))}</div>
+        </div>
+        <button onclick="openRestockPad('${p.ProductID}')" class="btn-gold px-4 py-2.5 text-sm shrink-0">＋ Received</button>
+      </div>`).join('')}
+    ${q && !results.length ? `<div class="text-center text-[#8A8580] py-4">No match — <button class="underline" onclick="openAddProduct()">add it as a new product</button></div>` : ''}
+    ${recent.length ? `<div class="text-xs font-semibold text-[#8A8580] uppercase tracking-wider mt-6 mb-2">Recently received</div>
+      ${recent.map(r => {
+        const p = S.products.find(p => p.ProductID === r.ProductID) || {};
+        return `<div class="card p-3 mb-2 flex items-center justify-between">
+          <div class="text-sm min-w-0 mr-2 truncate"><b>+${fmtQty(r.Qty)}</b> ${esc(prodName(p))} <span class="text-[#8A8580]">· ${fmtDate(r.Date)}</span></div>
+          <button onclick="undoRestock('${r.RestockID}')" class="text-sm text-[#8B2D3A] shrink-0">Undo</button>
+        </div>`;
+      }).join('')}` : ''}`;
+}
+function openRestockPad(pid) {
+  const p = S.products.find(p => p.ProductID === pid);
+  showModal(`
+    <div class="font-semibold text-lg mb-0.5">Received: ${esc(prodName(p))}</div>
+    <div class="text-sm text-[#8A8580] mb-4">${esc(prodSub(p))}</div>
+    <div class="grid grid-cols-4 gap-2 mb-3">
+      ${[1,2,3,4,5,6,8,12].map(n => `<button onclick="saveRestock('${pid}',${n})" class="btn-ghost py-3.5 text-lg">${n}</button>`).join('')}
+    </div>
+    <div class="flex gap-2">
+      <input id="rs-custom" type="number" step="0.5" min="0.5" inputmode="decimal" class="field" placeholder="Other amount">
+      <button onclick="const v=document.getElementById('rs-custom').value; if(v!=='')saveRestock('${pid}',Number(v))" class="btn-gold px-5">Log</button>
+    </div>
+    <p class="text-xs text-[#8A8580] mt-3">Tip: also add it to the zone where you put it away, from Count mode — restock only records that it arrived.</p>`);
+}
+async function saveRestock(pid, qty) {
+  closeModal();
+  try {
+    const out = await apiPost('restock', { productId: pid, qty: qty });
+    S.restocks.push({ RestockID: out.restockId, Date: new Date().toISOString(), ProductID: pid, Qty: qty, Note: '' });
+    S.restockSearch = ''; render(); toast('Logged +' + fmtQty(qty) + ' ✓');
+  } catch (e) {}
+}
+async function undoRestock(id) {
+  S.restocks = S.restocks.filter(r => String(r.RestockID) !== String(id));
+  render();
+  try { await apiPost('deleteRestock', { restockId: id }); toast('Undone'); } catch (e) {}
+}
+
+/* ==================== ORDER LIST ==================== */
+function viewOrder() {
+  const below = activeProducts().map(p => ({ p: p, have: totalFor(p.ProductID) }))
+    .filter(x => x.have < Number(x.p.Par || 0));
+  const byCat = {};
+  below.forEach(x => (byCat[x.p.Category] = byCat[x.p.Category] || []).push(x));
+  const est = below.reduce((s, x) => s + (Number(x.p.Price) || 0) * Math.max(0, Number(x.p.Par) - x.have), 0);
+  return `
+    <h2 class="text-lg font-semibold mb-1">Order list</h2>
+    <p class="text-sm text-[#8A8580] mb-4">Everything below its par level, ready to read off while you order.${est ? ` Estimated cost to refill: <b>$${est.toFixed(2)}</b> (where prices are known).` : ''}</p>
+    ${below.length ? `<button onclick="copyOrderList()" class="btn-ghost w-full py-3 mb-4">Copy list to clipboard</button>` : ''}
+    ${CATEGORIES.filter(c => byCat[c]).map(c => `
+      <div class="text-xs font-semibold text-[#8A8580] uppercase tracking-wider mt-4 mb-1.5 px-1">${c}</div>
+      ${byCat[c].map(x => `
+        <div class="card p-3 mb-2 flex items-center justify-between">
+          <div class="min-w-0 mr-2">
+            <div class="font-medium truncate">${esc(prodName(x.p))}</div>
+            <div class="text-xs text-[#8A8580] truncate">${esc(prodSub(x.p))}</div>
+          </div>
+          <div class="text-right text-sm shrink-0">
+            <span class="text-[#8B2D3A] font-semibold">have ${fmtQty(x.have)}</span>
+            <span class="text-[#8A8580]"> / par ${fmtQty(x.p.Par)}</span>
+          </div>
+        </div>`).join('')}`).join('')}
+    ${!below.length ? '<div class="card p-8 text-center text-[#8A8580]">Nothing below par — fully stocked 🎉</div>' : ''}`;
+}
+function copyOrderList() {
+  const below = activeProducts().map(p => ({ p: p, have: totalFor(p.ProductID) }))
+    .filter(x => x.have < Number(x.p.Par || 0));
+  const txt = 'Salon Asteria — order list (' + new Date().toLocaleDateString() + ')\n' +
+    below.map(x => `• ${prodFull(x.p)} — have ${fmtQty(x.have)}, par ${fmtQty(x.p.Par)}`).join('\n');
+  navigator.clipboard.writeText(txt).then(() => toast('Copied ✓'), () => toast('Couldn’t copy', true));
+}
+
+/* ==================== FINISH COUNT ==================== */
+function confirmFinish() {
+  const last = lastSnapshot();
+  showModal(`
+    <div class="font-semibold text-lg mb-2">Finish this count?</div>
+    <p class="text-sm text-[#8A8580] mb-4">Today's numbers get saved as a snapshot${last ? ' and compared against ' + fmtDate(last.Date) + ' to calculate what was used' : ''}. Make sure you've walked every zone first.</p>
+    <input id="fc-notes" class="field mb-4" placeholder="Note (optional — e.g. 'weekly count')">
+    <div class="flex gap-2">
+      <button onclick="closeModal()" class="btn-ghost flex-1 py-3.5">Not yet</button>
+      <button onclick="doFinish()" class="btn-dark flex-1 py-3.5">Save snapshot</button>
+    </div>`);
+}
+async function doFinish() {
+  const notes = document.getElementById('fc-notes').value.trim();
+  closeModal();
+  try {
+    const out = await apiPost('finishCount', { notes: notes });
+    S.snapshots.push({ SnapshotID: out.snapshotId, Date: new Date().toISOString(), Status: 'closed', Notes: notes });
+    S.touched = {};
+    toast('Count #' + out.snapshotId + ' saved ✓');
+    go('report');
+  } catch (e) {}
+}
+
+/* ==================== REPORT ==================== */
+async function loadReport() {
+  try {
+    S.report = await apiGet('report');
+    document.getElementById('view').innerHTML = viewReport();
+  } catch (e) {
+    document.getElementById('view').innerHTML = '<div class="text-center text-[#8A8580] py-10">Couldn’t load the report — tap ↻ to retry.</div>';
+  }
+}
+function viewReport() {
+  const r = S.report;
+  const back = `<button onclick="go('more')" class="w-10 h-10 rounded-full bg-white shadow-sm text-lg mb-3">‹</button>`;
+  if (!r || !r.ready) return back + `<div class="card p-8 text-center text-[#8A8580]">${esc((r && r.message) || 'Complete two counts to see usage.')}<br><br>Usage appears here automatically once there are two snapshots to compare.</div>`;
+  const used = r.rows.filter(x => x.usage > 0).sort((a,b) => b.usage - a.usage);
+  const odd = r.rows.filter(x => x.usage < 0);
+  return back + `
+    <h2 class="text-lg font-semibold mb-1">What got used</h2>
+    <p class="text-sm text-[#8A8580] mb-4">${fmtDate(r.previous.date)} → ${fmtDate(r.current.date)} · last count + restocks − this count</p>
+    ${used.map(x => `
+      <div class="card p-3 mb-2 flex items-center justify-between">
+        <div class="min-w-0 mr-2">
+          <div class="font-medium truncate">${esc([x.shade, x.subType, x.line].filter(Boolean)[0] || x.brand)}</div>
+          <div class="text-xs text-[#8A8580] truncate">${esc([x.brand, x.line, x.shade ? x.subType : ''].filter(Boolean).join(' · '))}</div>
+        </div>
+        <div class="text-right shrink-0">
+          <div class="text-lg font-semibold">−${fmtQty(x.usage)}</div>
+          <div class="text-[10px] text-[#8A8580] uppercase">${x.label}${x.restocked ? ' · +' + fmtQty(x.restocked) + ' recvd' : ''}</div>
+        </div>
+      </div>`).join('') || '<div class="card p-8 text-center text-[#8A8580]">Nothing used this period.</div>'}
+    ${odd.length ? `<div class="text-xs font-semibold text-[#8A8580] uppercase tracking-wider mt-6 mb-2">Check these (count went UP without a restock)</div>
+      ${odd.map(x => `<div class="card p-3 mb-2 text-sm flex justify-between"><span>${esc([x.brand, x.line, x.shade].filter(Boolean).join(' '))}</span><b>+${fmtQty(-x.usage)}</b></div>`).join('')}
+      <p class="text-xs text-[#8A8580]">Usually means a delivery wasn't logged in Restock, or a counting slip.</p>` : ''}`;
+}
+
+/* ==================== MORE / ZONES ==================== */
+function viewMore() {
+  return `
+    <div class="card divide-y divide-[#F1EDE7]">
+      <button onclick="go('report')" class="w-full p-4 text-left flex justify-between items-center"><span class="font-medium">📊 Usage report</span><span class="text-[#C4A265]">›</span></button>
+      <button onclick="go('zones')" class="w-full p-4 text-left flex justify-between items-center"><span class="font-medium">📍 Edit zones</span><span class="text-[#C4A265]">›</span></button>
+      <button onclick="refreshData()" class="w-full p-4 text-left flex justify-between items-center"><span class="font-medium">↻ Refresh data</span></button>
+      <button onclick="logout()" class="w-full p-4 text-left text-[#8B2D3A] font-medium">Sign out</button>
+    </div>
+    <p class="text-xs text-[#8A8580] text-center mt-6">Salon Asteria Inventory · data lives in Google Sheets</p>`;
+}
+function viewZones() {
+  const zones = activeZones();
+  return `
+    <div class="flex items-center gap-2 mb-3">
+      <button onclick="go('more')" class="w-10 h-10 rounded-full bg-white shadow-sm text-lg shrink-0">‹</button>
+      <h2 class="text-lg font-semibold">Zones</h2>
+    </div>
+    <p class="text-sm text-[#8A8580] mb-3">These are the stops on the inventory walk, in order. Rename, reorder, or add as many as you like.</p>
+    ${zones.map((z, i) => `
+      <div class="card p-3 mb-2 flex items-center gap-2">
+        <div class="flex flex-col gap-1">
+          <button onclick="moveZone('${z.ZoneID}',-1)" ${i === 0 ? 'disabled style="opacity:.3"' : ''} class="w-8 h-8 bg-[#F1EDE7] rounded-lg text-sm">▲</button>
+          <button onclick="moveZone('${z.ZoneID}',1)" ${i === zones.length - 1 ? 'disabled style="opacity:.3"' : ''} class="w-8 h-8 bg-[#F1EDE7] rounded-lg text-sm">▼</button>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="font-medium">${esc(z.Name)}</div>
+          <div class="text-xs text-[#8A8580]">${zoneEntries(z.ZoneID).length} products</div>
+        </div>
+        <button onclick="renameZone('${z.ZoneID}')" class="btn-ghost px-3 py-2 text-sm">Rename</button>
+        <button onclick="hideZone('${z.ZoneID}')" class="text-sm text-[#8B2D3A] px-2">Hide</button>
+      </div>`).join('')}
+    <div class="flex gap-2 mt-4">
+      <input id="new-zone" class="field" placeholder="New zone name (e.g. Front Desk Drawer)">
+      <button onclick="createZone()" class="btn-gold px-5 shrink-0">Add</button>
+    </div>`;
+}
+async function createZone() {
+  const name = document.getElementById('new-zone').value.trim();
+  if (!name) return;
+  try {
+    const out = await apiPost('addZone', { name: name });
+    S.zones.push({ ZoneID: out.zoneId, Name: name, SortOrder: Math.max(0, ...S.zones.map(z => Number(z.SortOrder) || 0)) + 1, Active: 'Y' });
+    render(); toast('Zone added ✓');
+  } catch (e) {}
+}
+function renameZone(zid) {
+  const z = S.zones.find(z => z.ZoneID === zid);
+  const name = prompt('Zone name:', z.Name);
+  if (!name || name.trim() === z.Name) return;
+  z.Name = name.trim(); render();
+  apiPost('updateZone', { zoneId: zid, name: z.Name }).catch(()=>{});
+}
+async function hideZone(zid) {
+  if (zoneEntries(zid).length && !confirm('This zone still has products in it. Hide it anyway? (Products keep their counts; you can re-show the zone in the Zones tab of the sheet.)')) return;
+  const z = S.zones.find(z => z.ZoneID === zid);
+  z.Active = ''; render();
+  apiPost('updateZone', { zoneId: zid, active: false }).catch(()=>{});
+}
+async function moveZone(zid, dir) {
+  const zones = activeZones();
+  const i = zones.findIndex(z => z.ZoneID === zid);
+  const j = i + dir;
+  if (j < 0 || j >= zones.length) return;
+  const a = zones[i], b = zones[j];
+  const tmp = a.SortOrder; a.SortOrder = b.SortOrder; b.SortOrder = tmp;
+  render();
+  apiPost('updateZone', { zoneId: a.ZoneID, sortOrder: Number(a.SortOrder) }).catch(()=>{});
+  apiPost('updateZone', { zoneId: b.ZoneID, sortOrder: Number(b.SortOrder) }).catch(()=>{});
+}
+
+/* ==================== UI utilities ==================== */
+function showModal(html) {
+  document.getElementById('modal-box').innerHTML = html;
+  document.getElementById('modal-wrap').classList.remove('hidden');
+}
+function closeModal() { document.getElementById('modal-wrap').classList.add('hidden'); }
+let toastTimer;
+function toast(msg, isError) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl text-sm text-white shadow-lg ' + (isError ? 'bg-[#8B2D3A]' : 'bg-[#2D2A32]');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.add('hidden'), 2500);
+}
+
+// ---------- Start ----------
+if (S.token) boot(); else { document.getElementById('pin-screen').classList.remove('hidden'); renderPinDots(); }
+</script>
+</body>
+</html>
