@@ -657,14 +657,33 @@ const NAV_MAP = {
   howto: 'more', problems: 'more'
 };
 
-function go(view, zoneId) {
+/* Back closes the modal, then leaves the zone, then leaves the tab — never
+   the app. Without this, Android's back button and iOS edge-swipe dropped
+   the user out of a half-finished count entirely. */
+let modalHasHistory = false;
+let ignoreNextPop = false;
+
+function go(view, zoneId, opts) {
+  opts = opts || {};
   S.view = view;
   if (zoneId !== undefined) S.zoneId = zoneId;
   S.countSearch = ''; S.browseSearch = ''; S.restockSearch = '';
   saveSession();
+  if (!opts.pop) history.pushState({ v: view, z: S.zoneId }, '');
   render();
   window.scrollTo(0, 0);
 }
+
+window.addEventListener('popstate', e => {
+  if (ignoreNextPop) { ignoreNextPop = false; return; }
+  if (modal().open) {                 // back dismisses the sheet first
+    modalHasHistory = false;
+    modal().close();
+    return;
+  }
+  const st = e.state || {};
+  go(st.v || 'count', st.z, { pop: true });
+});
 
 function render() {
   document.querySelectorAll('.tab').forEach(b => b.classList.remove('is-active'));
@@ -686,14 +705,90 @@ function render() {
   else if (S.view === 'problems')v.innerHTML = viewProblems();
   else if (S.view === 'report')  { v.innerHTML = viewReportLoading(); loadReport(); }
 
+  announceScreen();
   refreshPendingMarks();
+}
+
+/* Announce the screen name, not the whole rebuilt view. */
+function announceScreen() {
+  const el = $('screen-announce');
+  if (!el) return;
+  const h = $('view').querySelector('.screen-title');
+  const name = h ? h.textContent.trim() : S.view;
+  const n = Q.pending();
+  el.textContent = name + (n ? ` · ${n} ${n === 1 ? 'change' : 'changes'} not saved` : '');
 }
 
 const icon = (name, cls) => `<svg class="${cls || 'icon'}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const backBtn = view => `<button type="button" class="icon-btn" data-act="go" data-view="${view}" aria-label="Back">${icon('back')}</button>`;
 
+/* Every screen goes through here, so none of them can drift out of the
+   heading + blurb pattern the way Browse and More used to. */
+function page(o) {
+  return `
+    ${o.back
+      ? `<div class="screen-head">${backBtn(o.back)}<h2 class="screen-title">${esc(o.title)}</h2></div>`
+      : `<h2 class="screen-title">${esc(o.title)}</h2>`}
+    ${o.blurb ? `<p class="screen-blurb">${o.blurb}</p>` : ''}
+    ${o.body || ''}`;
+}
+
+/* One empty state, always with a face: an icon, a plain-language title,
+   a sentence of orientation, and — where there is one — the button that
+   resolves it. */
+function empty(o) {
+  return `<div class="empty">
+    <div class="empty__icon">${icon(o.icon || 'info', 'icon')}</div>
+    <div class="empty__title">${esc(o.title)}</div>
+    ${o.body ? `<div class="empty__body">${o.body}</div>` : ''}
+    ${o.action || ''}</div>`;
+}
+
+/* ==================== FIRST RUN ==================== */
+/* Day one used to be a PIN screen followed by a list of empty zones.
+   Until there is something to count, the app asks for one thing at a time. */
+function isFirstRun() { return !activeZones().length || !activeProducts().length; }
+
+function viewFirstRun() {
+  const hasZones = activeZones().length > 0;
+  return page({
+    title: 'Let’s set the salon up',
+    blurb: 'Two steps, once. After this you just walk and count.',
+    body: `
+      <div class="card" style="padding:6px 18px 14px">
+        <div class="howto">
+          <div class="howto__step">
+            <div class="howto__n">${hasZones ? icon('check', 'icon icon--sm') : '1'}</div>
+            <div>
+              <div class="howto__t">Name your stops</div>
+              <div class="howto__b">${hasZones
+                ? `Done — ${activeZones().length} ${activeZones().length === 1 ? 'zone' : 'zones'}: ${esc(activeZones().map(z => z.Name).join(', '))}.`
+                : 'A zone is somewhere you stand while counting — the colour bar, the retail shelf, the stockroom.'}</div>
+              ${hasZones
+                ? `<button type="button" class="btn btn--ghost btn--sm" data-act="go" data-view="zones" style="margin-top:8px">Edit zones</button>`
+                : `<button type="button" class="btn btn--gold btn--sm" data-act="go" data-view="zones" style="margin-top:8px">Add your first zone</button>`}
+            </div>
+          </div>
+          <div class="howto__step">
+            <div class="howto__n">2</div>
+            <div>
+              <div class="howto__t">Put products on the shelves</div>
+              <div class="howto__b">${hasZones
+                ? 'Open a zone, search for anything in front of you, and add it. You do not need a full list first — build it as you walk.'
+                : 'You can only do this once there is a zone to put them in.'}</div>
+              ${hasZones ? `<button type="button" class="btn btn--gold btn--sm" data-act="openZone" data-zone="${esc(activeZones()[0].ZoneID)}" style="margin-top:8px">Start with ${esc(activeZones()[0].Name)}</button>` : ''}
+            </div>
+          </div>
+        </div>
+      </div>
+      <button type="button" class="linkbtn linkbtn--block" data-act="go" data-view="howto" style="margin-top:14px">How the whole thing works</button>`
+  });
+}
+
 /* ==================== COUNT: zone picker ==================== */
 function viewCount() {
+  if (isFirstRun()) return viewFirstRun();
+
   const zones = activeZones();
   const totalTouched = Object.keys(S.touched).length;
 
@@ -721,26 +816,28 @@ function viewCount() {
        </button>`
     : '';
 
-  return `
-    <h2 class="screen-title">Where are you standing?</h2>
-    <p class="screen-blurb">Pick a zone and count what you see. When the whole walk is done, finish the count below.</p>
-    ${resume ? `<div class="rows" style="margin-bottom:14px">${resume}</div>` : ''}
-    <div class="rows">${list || '<div class="empty"><div class="empty__title">No zones yet</div><div class="empty__body">Add your first stop on the walk from More → Edit zones.</div></div>'}</div>
-    <button type="button" class="btn btn--dark btn--block btn--lg" data-act="confirmFinish" style="margin-top:18px">Finish Count — Save Snapshot</button>
-    <p class="screen-blurb center" style="margin-top:8px">This freezes today’s numbers and starts a fresh usage period.</p>`;
+  return page({
+    title: 'Where are you standing?',
+    blurb: 'Pick a zone and count what you see. When the whole walk is done, finish the count below.',
+    body: `
+      ${resume ? `<div class="rows" style="margin-bottom:14px">${resume}</div>` : ''}
+      <div class="rows">${list}</div>
+      <button type="button" class="btn btn--dark btn--block btn--lg" data-act="confirmFinish" style="margin-top:18px">Finish count — save snapshot</button>
+      <p class="screen-blurb center" style="margin-top:8px">This freezes today’s numbers and starts a fresh usage period.</p>`
+  });
 }
 
 /* ==================== COUNT: inside a zone ==================== */
 function viewZone() {
-  return `
-    <div class="screen-head">
-      ${backBtn('count')}
-      <h2 class="screen-title">${esc(zoneName(S.zoneId))}</h2>
-    </div>
-    <input class="field" id="zone-search" data-search="countSearch" data-body="zone-body"
-      placeholder="Search anything — add it to this zone" value="${esc(S.countSearch)}"
-      autocomplete="off" aria-label="Search products to add to this zone">
-    <div id="zone-body" style="margin-top:10px">${zoneBody()}</div>`;
+  return page({
+    back: 'count',
+    title: zoneName(S.zoneId),
+    body: `
+      <input class="field" id="zone-search" data-search="countSearch" data-body="zone-body"
+        placeholder="Search anything — add it to this zone" value="${esc(S.countSearch)}"
+        autocomplete="off" aria-label="Search products to add to this zone">
+      <div id="zone-body" style="margin-top:10px">${zoneBody()}</div>`
+  });
 }
 
 function zoneBody() {
@@ -766,21 +863,25 @@ function zoneBody() {
     }).join('');
 
     return `
-      ${all.length ? '' : `<div class="empty"><div class="empty__title">Nothing matches “${esc(q)}”</div><div class="empty__body">Check the spelling, or add it as a new product below.</div></div>`}
+      ${all.length ? '' : empty({
+        icon: 'browse',
+        title: `Nothing matches “${esc(q)}”`,
+        body: 'Check the spelling, or add it as a new product below.'
+      })}
       <div class="rows">${rows}</div>
       ${countNote(all.length, results.length)}
       <button type="button" class="btn btn--ghost btn--block" data-act="addProduct" data-zone="${esc(zid)}" style="margin-top:10px">
-        ${icon('plus', 'icon icon--sm')} New product “${esc(q)}”
+        ${icon('plus', 'icon icon--sm')} Add “${esc(q)}” as a new product
       </button>`;
   }
 
   const groups = groupSort(zoneEntries(zid));
   if (!groups.length) {
-    return `<div class="empty">
-      <div class="empty__icon">${icon('pin', 'icon')}</div>
-      <div class="empty__title">Nothing in this zone yet</div>
-      <div class="empty__body">Search above for anything on the shelf in front of you — it gets added here.</div>
-    </div>`;
+    return empty({
+      icon: 'pin',
+      title: 'Nothing in this zone yet',
+      body: 'Search above for anything on the shelf in front of you — it gets added here.'
+    });
   }
   return groups.map(g =>
     `<div class="section-label">${esc(g.label)}</div>
@@ -896,12 +997,32 @@ function openQtyPad(pid, zid) {
 
 function removeFromZoneUI(pid, zid) {
   closeModal();
+  const prev = countRow(pid, zid);
+  const prevQty = prev ? Number(prev.Qty) || 0 : 0;
   S.counts = S.counts.filter(c => !(c.ProductID === pid && c.ZoneID === zid));
   delete S.touched[pid + '|' + zid];
   saveSession();
   Q.push('removeFromZone', { productId: pid, zoneId: zid });
   render();
-  toast('Removed');
+  const p = S.products.find(p => p.ProductID === pid);
+  toastUndo(`Removed ${prodName(p)} from ${zoneName(zid)}`, () => {
+    setLocalCount(pid, zid, prevQty);
+    toast('Put back');
+  });
+}
+
+/* Sets an absolute quantity and offers a way back to the previous one. */
+function setQtyWithUndo(pid, zid, qty) {
+  const cur = countRow(pid, zid);
+  const prevQty = cur ? Number(cur.Qty) || 0 : 0;
+  const existed = !!cur;
+  setLocalCount(pid, zid, qty);
+  const p = S.products.find(p => p.ProductID === pid);
+  if (Math.round(prevQty * 2) / 2 === Math.round(qty * 2) / 2) return;
+  toastUndo(`${prodName(p)} set to ${fmtQty(qty)}`, () => {
+    if (!existed && prevQty === 0) removeFromZoneUI(pid, zid);
+    else { setLocalCount(pid, zid, prevQty); toast(`Back to ${fmtQty(prevQty)}`); }
+  });
 }
 
 /* ==================== VERIFY ==================== */
@@ -1150,21 +1271,23 @@ function archiveProductConfirm(pid) {
 
 /* ==================== BROWSE ==================== */
 function viewBrowse() {
-  return `
-    <h2 class="screen-title">Browse</h2>
-    <p class="screen-blurb">Everything on the shelves, with what you have of it right now.</p>
-    <input class="field" id="browse-search" data-search="browseSearch" data-body="browse-body"
-      placeholder="Search all products" value="${esc(S.browseSearch)}" autocomplete="off"
-      aria-label="Search all products">
-    <div class="chips" role="group" aria-label="Filter by category">
-      ${['All'].concat(catalogCategories()).map(c =>
-        `<button type="button" class="chip${S.browseCat === c ? ' is-active' : ''}" data-act="browseCat"
-          data-cat="${esc(c)}" aria-pressed="${S.browseCat === c}">${esc(c)}</button>`).join('')}
-    </div>
-    <button type="button" class="btn btn--gold btn--block" data-act="addProduct" style="margin-bottom:6px">
-      ${icon('plus', 'icon icon--sm')} Add a new product
-    </button>
-    <div id="browse-body">${browseBody()}</div>`;
+  return page({
+    title: 'Browse',
+    blurb: 'Everything on the shelves, with what you have of it right now.',
+    body: `
+      <input class="field" id="browse-search" data-search="browseSearch" data-body="browse-body"
+        placeholder="Search all products" value="${esc(S.browseSearch)}" autocomplete="off"
+        aria-label="Search all products">
+      <div class="chips" role="group" aria-label="Filter by category">
+        ${['All'].concat(catalogCategories()).map(c =>
+          `<button type="button" class="chip${S.browseCat === c ? ' is-active' : ''}" data-act="browseCat"
+            data-cat="${esc(c)}" aria-pressed="${S.browseCat === c}">${esc(c)}</button>`).join('')}
+      </div>
+      <button type="button" class="btn btn--gold btn--block" data-act="addProduct" style="margin-bottom:6px">
+        ${icon('plus', 'icon icon--sm')} Add a product
+      </button>
+      <div id="browse-body">${browseBody()}</div>`
+  });
 }
 
 function browseBody() {
@@ -1175,7 +1298,14 @@ function browseBody() {
 
   const total = list.length;
   const shown = list.slice(0, SEARCH_CAP);
-  if (!total) return `<div class="empty"><div class="empty__title">No matches</div><div class="empty__body">Try a shorter search, or a different category.</div></div>`;
+  if (!total) return empty({
+    icon: 'browse',
+    title: 'No matches',
+    body: q && S.browseCat !== 'All'
+      ? `Nothing in ${esc(S.browseCat)} matches “${esc(q)}”. Try All categories.`
+      : 'Try a shorter search, or a different category.',
+    action: `<button type="button" class="btn btn--ghost btn--sm" data-act="addProduct">${icon('plus', 'icon icon--sm')} Add a product</button>`
+  });
 
   const groups = groupSort(shown.map(p => ({ p: p })));
   return groups.map(g => `
@@ -1201,13 +1331,15 @@ function browseBody() {
 
 /* ==================== RESTOCK ==================== */
 function viewRestock() {
-  return `
-    <h2 class="screen-title">Restock</h2>
-    <p class="screen-blurb">Just unpacked an order? Log what arrived — takes seconds, keeps usage numbers honest.</p>
-    <input class="field" id="restock-search" data-search="restockSearch" data-body="restock-body"
-      placeholder="Search the product that arrived" value="${esc(S.restockSearch)}" autocomplete="off"
-      aria-label="Search the product that arrived">
-    <div id="restock-body" style="margin-top:10px">${restockBody()}</div>`;
+  return page({
+    title: 'Restock',
+    blurb: 'Just unpacked an order? Log what arrived — takes seconds, keeps usage numbers honest.',
+    body: `
+      <input class="field" id="restock-search" data-search="restockSearch" data-body="restock-body"
+        placeholder="Search the product that arrived" value="${esc(S.restockSearch)}" autocomplete="off"
+        aria-label="Search the product that arrived">
+      <div id="restock-body" style="margin-top:10px">${restockBody()}</div>`
+  });
 }
 
 function restockBody() {
@@ -1229,11 +1361,17 @@ function restockBody() {
 
   return `
     ${results.length ? `<div class="rows">${resultsHTML}</div>${countNote(all.length, results.length)}` : ''}
-    ${q && !all.length ? `<div class="empty">
-        <div class="empty__title">No match for “${esc(q)}”</div>
-        <div class="empty__body">If it is genuinely new, add it as a product.</div>
-        <button type="button" class="btn btn--ghost btn--sm" data-act="addProduct">Add a new product</button>
-      </div>` : ''}
+    ${q && !all.length ? empty({
+      icon: 'restock',
+      title: `No match for “${esc(q)}”`,
+      body: 'If it is genuinely new, add it as a product first.',
+      action: `<button type="button" class="btn btn--ghost btn--sm" data-act="addProduct">${icon('plus', 'icon icon--sm')} Add a product</button>`
+    }) : ''}
+    ${!q && !recent.length ? empty({
+      icon: 'restock',
+      title: 'Nothing logged yet',
+      body: 'When a delivery lands, search for it above and log what arrived. That is what keeps the usage report honest.'
+    }) : ''}
     ${recent.length ? `<div class="section-label">Recently received</div>
       <div class="rows">${recent.map(r => {
         const p = S.products.find(p => p.ProductID === r.ProductID);
@@ -1335,48 +1473,56 @@ function viewOrder() {
   const priced = toBuy.filter(x => Number(x.p.Price) > 0).length;
 
   if (!below.length) {
-    return `<h2 class="screen-title">Order list</h2>
-      <p class="screen-blurb">Everything below its par level, ready to read off while you order.</p>
-      <div class="empty">
-        <div class="empty__icon">${icon('check', 'icon')}</div>
-        <div class="empty__title">Nothing below par</div>
-        <div class="empty__body">Fully stocked. This fills itself in as counts drop.</div>
-      </div>`;
+    return page({
+      title: 'Order list',
+      blurb: 'Everything below its reorder level, ready to read off while you order.',
+      body: empty({
+        icon: 'check',
+        title: 'Nothing to order',
+        body: 'Everything is at or above its reorder level. This list fills itself in as counts drop.'
+      })
+    });
   }
 
-  return `
-    <h2 class="screen-title">Order list</h2>
-    <p class="screen-blurb">Tap anything you’ve ordered and it moves out of the way until it arrives.</p>
-    ${toBuy.length ? `<div class="stat-grid">
-      <div class="stat"><div class="stat__num">${toBuy.length}</div><div class="stat__label">to order</div></div>
-      <div class="stat"><div class="stat__num">${est ? '$' + est.toFixed(0) : '—'}</div>
-        <div class="stat__label">${est ? `est. refill · ${priced} of ${toBuy.length} priced` : 'no prices on file'}</div></div>
-    </div>` : ''}
-    ${toBuy.length ? `<button type="button" class="btn btn--ghost btn--block" data-act="copyOrder" style="margin-bottom:6px">Copy list to clipboard</button>` : ''}
-    ${order.map(c => `
-      <div class="section-label">${esc(c)}</div>
-      <div class="rows">${byCat[c].map(x => `
-        <button type="button" class="row is-tappable" data-act="markOrdered" data-pid="${esc(x.p.ProductID)}">
-          <div class="row__main">
-            <div class="row__title"><span>${esc(prodName(x.p))}</span></div>
-            <div class="row__sub">${esc(prodSub(x.p))}</div>
-          </div>
-          <div class="row__meta">
-            <div class="row__big danger">${fmtQty(x.have)}</div>
-            <div class="row__sub">of ${fmtQty(x.p.Par)}</div>
-          </div>
-        </button>`).join('')}</div>`).join('')}
-    ${!toBuy.length ? `<div class="empty"><div class="empty__title">All ordered</div>
-      <div class="empty__body">Everything below par is on its way. Log it in Restock when it lands.</div></div>` : ''}
-    ${waiting.length ? `<div class="section-label">${icon('clock', 'icon icon--sm')} On the way</div>
-      <div class="rows">${waiting.map(x => `
-        <div class="row">
-          <div class="row__main">
-            <div class="row__title"><span>${esc(prodName(x.p))}</span></div>
-            <div class="row__sub">Ordered ${esc(fmtWhen(S.ordered[x.p.ProductID]))} · clears itself when you log it in Restock</div>
-          </div>
-          <button type="button" class="linkbtn" data-act="unmarkOrdered" data-pid="${esc(x.p.ProductID)}">Undo</button>
-        </div>`).join('')}</div>` : ''}`;
+  return page({
+    title: 'Order list',
+    blurb: 'Tap anything you’ve ordered and it moves out of the way until it arrives.',
+    body: `
+      ${toBuy.length ? `<div class="stat-grid">
+        <div class="stat"><div class="stat__num">${toBuy.length}</div><div class="stat__label">to order</div></div>
+        <div class="stat"><div class="stat__num">${est ? '$' + est.toFixed(0) : '—'}</div>
+          <div class="stat__label">${est ? `est. refill · ${priced} of ${toBuy.length} priced` : 'no prices on file'}</div></div>
+      </div>` : ''}
+      ${toBuy.length ? `<button type="button" class="btn btn--ghost btn--block" data-act="copyOrder" style="margin-bottom:6px">Copy list to clipboard</button>` : ''}
+      ${order.map(c => `
+        <div class="section-label">${esc(c)}</div>
+        <div class="rows">${byCat[c].map(x => `
+          <button type="button" class="row is-tappable" data-act="markOrdered" data-pid="${esc(x.p.ProductID)}"
+            aria-label="${esc(prodFull(x.p))}: have ${fmtQty(x.have)}, reorder at ${fmtQty(x.p.Par)}. Mark as ordered">
+            <div class="row__main">
+              <div class="row__title"><span>${esc(prodName(x.p))}</span></div>
+              <div class="row__sub">${esc(prodSub(x.p))}</div>
+            </div>
+            <div class="row__meta">
+              <div class="row__big danger">${fmtQty(x.have)}</div>
+              <div class="row__sub">have · reorder at ${fmtQty(x.p.Par)}</div>
+            </div>
+          </button>`).join('')}</div>`).join('')}
+      ${!toBuy.length ? empty({
+        icon: 'clock',
+        title: 'All ordered',
+        body: 'Everything below its reorder level is on its way. Log it in Restock when it lands and it clears itself.'
+      }) : ''}
+      ${waiting.length ? `<div class="section-label">On the way</div>
+        <div class="rows">${waiting.map(x => `
+          <div class="row">
+            <div class="row__main">
+              <div class="row__title">${icon('clock', 'icon icon--sm')}<span>${esc(prodName(x.p))}</span></div>
+              <div class="row__sub">Ordered ${esc(fmtWhen(S.ordered[x.p.ProductID]))} · clears itself when you log it in Restock</div>
+            </div>
+            <button type="button" class="linkbtn" data-act="unmarkOrdered" data-pid="${esc(x.p.ProductID)}">Not ordered</button>
+          </div>`).join('')}</div>` : ''}`
+  });
 }
 
 function markOrdered(pid) {
@@ -1457,8 +1603,10 @@ async function doFinish() {
 
 /* ==================== REPORT ==================== */
 function viewReportLoading() {
-  return `<div class="screen-head">${backBtn('more')}<h2 class="screen-title">What got used</h2></div>
-    <div class="empty"><div class="spinner"></div><div class="empty__body">Building the report…</div></div>`;
+  return page({
+    back: 'more', title: 'What got used',
+    body: `<div class="empty"><div class="spinner"></div><div class="empty__body">Building the report…</div></div>`
+  });
 }
 
 async function loadReport() {
@@ -1467,9 +1615,18 @@ async function loadReport() {
     $('view').innerHTML = viewReport();
   } catch (e) {
     Log.add('report', e);
-    $('view').innerHTML = `<div class="screen-head">${backBtn('more')}<h2 class="screen-title">What got used</h2></div>
-      <div class="empty"><div class="empty__title">Couldn’t load the report</div>
-      <div class="empty__body">${navigator.onLine ? 'Tap refresh in the header to try again.' : 'You’re offline — this one needs a connection.'}</div></div>`;
+    $('view').innerHTML = page({
+      back: 'more', title: 'What got used',
+      body: empty({
+        icon: 'chart',
+        title: 'Couldn’t load the report',
+        body: navigator.onLine
+          ? 'The sheet didn’t answer. This one needs a live connection — everything else still works.'
+          : 'You’re offline. The report is worked out on the server, so it needs a connection.',
+        action: navigator.onLine
+          ? `<button type="button" class="btn btn--ghost btn--sm" data-act="go" data-view="report">Try again</button>` : ''
+      })
+    });
   }
 }
 
@@ -1486,21 +1643,24 @@ function priceIndex() {
 
 function viewReport() {
   const r = S.report;
-  const head = `<div class="screen-head">${backBtn('more')}<h2 class="screen-title">What got used</h2></div>`;
 
   if (!r || !r.ready) {
-    return head + `<div class="empty">
-      <div class="empty__icon">${icon('chart', 'icon')}</div>
-      <div class="empty__title">${esc((r && r.message) || 'Two counts needed')}</div>
-      <div class="empty__body">Finish a count today and another next week — the second one turns into this:</div>
-      <div class="rows" style="width:100%;opacity:.45;pointer-events:none;margin-top:6px">
-        <div class="row"><div class="row__main"><div class="row__title"><span>7N Natural Blonde</span></div>
-          <div class="row__sub">Wella · Koleston</div></div>
-          <div class="row__meta"><div class="row__big">−4</div><div class="row__sub">tubes</div></div></div>
-        <div class="row"><div class="row__main"><div class="row__title"><span>No.3 Hair Perfector</span></div>
-          <div class="row__sub">Olaplex</div></div>
-          <div class="row__meta"><div class="row__big">−2</div><div class="row__sub">bottles</div></div></div>
-      </div></div>`;
+    return page({
+      back: 'more', title: 'What got used',
+      body: empty({
+        icon: 'chart',
+        title: esc((r && r.message) || 'Two counts needed'),
+        body: `Finish a count today and another next week — the second one turns into this:
+          <div class="rows" style="width:100%;opacity:.45;pointer-events:none;margin-top:10px" aria-hidden="true">
+            <div class="row"><div class="row__main"><div class="row__title"><span>7N Natural Blonde</span></div>
+              <div class="row__sub">Wella · Koleston</div></div>
+              <div class="row__meta"><div class="row__big">−4</div><div class="row__sub">tubes</div></div></div>
+            <div class="row"><div class="row__main"><div class="row__title"><span>No.3 Hair Perfector</span></div>
+              <div class="row__sub">Olaplex</div></div>
+              <div class="row__meta"><div class="row__big">−2</div><div class="row__sub">bottles</div></div></div>
+          </div>`
+      })
+    });
   }
 
   const used = r.rows.filter(x => x.usage > 0).sort((a, b) => b.usage - a.usage);
@@ -1520,10 +1680,12 @@ function viewReport() {
     : 0;
   const perWeek = days ? (units / days) * 7 : 0;
 
-  return head + `
-    <p class="screen-blurb">${esc(fmtDate(r.previous.date))} → ${esc(fmtDate(r.current.date))}${
-      days ? ` · ${days} ${days === 1 ? 'day' : 'days'}` : ''} · last count + restocks − this count</p>
-
+  return page({
+    back: 'more',
+    title: 'What got used',
+    blurb: `${esc(fmtDate(r.previous.date))} → ${esc(fmtDate(r.current.date))}${
+      days ? ` · ${days} ${days === 1 ? 'day' : 'days'}` : ''} · last count + restocks − this count`,
+    body: `
     <div class="stat-grid">
       <div class="stat"><div class="stat__num">${fmtQty(units)}</div>
         <div class="stat__label">units used · ${used.length} ${used.length === 1 ? 'product' : 'products'}</div></div>
@@ -1557,21 +1719,27 @@ function viewReport() {
             <div class="row__sub">${esc(x.label || '')}${x.restocked ? ' · +' + fmtQty(x.restocked) + ' recvd' : ''}</div></div>
         </div>`).join('')}</div>` : ''}
 
-    ${!used.length ? '<div class="empty"><div class="empty__title">Nothing used this period</div></div>' : ''}
+    ${!used.length ? empty({
+      icon: 'check',
+      title: 'Nothing used this period',
+      body: 'Every count came back the same. Worth a glance if that seems unlikely.'
+    }) : ''}
 
     ${odd.length ? `<div class="section-label">Check these — count went up without a delivery</div>
       <div class="rows">${odd.map(x => `
         <div class="row"><div class="row__main"><div class="row__title">
           <span>${esc([x.brand, x.line, x.shade].filter(Boolean).join(' '))}</span></div></div>
           <div class="row__meta"><div class="row__big">+${fmtQty(-x.usage)}</div></div></div>`).join('')}</div>
-      <p class="screen-blurb" style="margin-top:8px">Usually a delivery that wasn’t logged in Restock, or a counting slip.</p>` : ''}`;
+      <p class="screen-blurb" style="margin-top:8px">Usually a delivery that wasn’t logged in Restock, or a counting slip.</p>` : ''}`
+  });
 }
 
 /* ==================== MORE ==================== */
 function viewMore() {
-  return `
-    <h2 class="screen-title">More</h2>
-    <p class="screen-blurb">Reports, zones and the housekeeping you rarely need.</p>
+  return page({
+    title: 'More',
+    blurb: 'Reports, zones and the housekeeping you rarely need.',
+    body: `
     <div class="menu">
       <button type="button" class="menu__item" data-act="go" data-view="report">
         ${icon('chart')}<span>Usage report</span><span class="menu__chev">${icon('next')}</span></button>
@@ -1587,14 +1755,17 @@ function viewMore() {
       <button type="button" class="menu__item menu__item--danger" data-act="logout">
         ${icon('out')}<span>Sign out</span></button>
     </div>
-    <p class="screen-blurb center" style="margin-top:24px">Salon Asteria Inventory · data lives in Google Sheets</p>`;
+    <p class="screen-blurb center" style="margin-top:24px">Salon Asteria Inventory · data lives in Google Sheets</p>`
+  });
 }
 
 /* ==================== HOW THIS WORKS ==================== */
 function viewHowto() {
-  return `
-    <div class="screen-head">${backBtn('more')}<h2 class="screen-title">How this works</h2></div>
-    <p class="screen-blurb">Four habits. The app does the arithmetic.</p>
+  return page({
+    back: 'more',
+    title: 'How this works',
+    blurb: 'Four habits. The app does the arithmetic.',
+    body: `
     <div class="card" style="padding:6px 18px 14px">
       <div class="howto">
         <div class="howto__step"><div class="howto__n">1</div><div>
@@ -1619,15 +1790,18 @@ function viewHowto() {
       <div class="row"><div class="row__main">
         <div class="row__title"><span>You can count with no signal</span></div>
         <div class="row__sub" style="white-space:normal">Changes are saved on the phone and sent when you’re back in range. The header tells you if anything is still waiting.</div></div></div>
-    </div>`;
+    </div>`
+  });
 }
 
 /* ==================== REPORT A PROBLEM ==================== */
 function viewProblems() {
   const items = [...Log.items].reverse();
-  return `
-    <div class="screen-head">${backBtn('more')}<h2 class="screen-title">Report a problem</h2></div>
-    <p class="screen-blurb">If something didn’t work, copy this and send it over — it says what actually failed.</p>
+  return page({
+    back: 'more',
+    title: 'Report a problem',
+    blurb: 'If something didn’t work, copy this and send it over — it says what actually failed.',
+    body: `
     ${items.length ? `
       <div class="cluster" style="margin-bottom:12px">
         <button type="button" class="btn btn--gold btn--sm" data-act="copyLog">Copy report</button>
@@ -1641,11 +1815,12 @@ function viewProblems() {
             <div class="row__sub muted">${esc(fmtWhen(e.at))}${e.online ? '' : ' · offline'}</div>
           </div>
         </div>`).join('')}</div>`
-    : `<div class="empty">
-        <div class="empty__icon">${icon('check', 'icon')}</div>
-        <div class="empty__title">Nothing has gone wrong</div>
-        <div class="empty__body">Errors get recorded here automatically if they ever do.</div>
-      </div>`}`;
+    : empty({
+        icon: 'check',
+        title: 'Nothing has gone wrong',
+        body: 'Errors get recorded here automatically if they ever do.'
+      })}`
+  });
 }
 
 function copyLog() {
@@ -1661,9 +1836,16 @@ function copyLog() {
 /* ==================== ZONES ==================== */
 function viewZones() {
   const zones = activeZones();
-  return `
-    <div class="screen-head">${backBtn('more')}<h2 class="screen-title">Zones</h2></div>
-    <p class="screen-blurb">These are the stops on the inventory walk, in order. Rename, reorder, or add as many as you like.</p>
+  return page({
+    back: isFirstRun() ? 'count' : 'more',
+    title: 'Zones',
+    blurb: 'These are the stops on the inventory walk, in order. Rename, reorder, or add as many as you like.',
+    body: `
+    ${zones.length ? '' : empty({
+      icon: 'pin',
+      title: 'No zones yet',
+      body: 'Start with somewhere you actually stand — “Colour Bar”, “Retail Shelf”, “Stockroom”. Add them below.'
+    })}
     <div class="rows">${zones.map((z, i) => `
       <div class="row">
         <div style="display:flex;flex-direction:column;gap:4px">
@@ -1682,7 +1864,8 @@ function viewZones() {
     <form class="inline-form" data-act="createZone" style="margin-top:16px">
       <input id="new-zone" class="field" placeholder="New zone name (e.g. Front Desk Drawer)" aria-label="New zone name">
       <button type="submit" class="btn btn--gold">Add</button>
-    </form>`;
+    </form>`
+  });
 }
 
 function createZone() {
@@ -1762,25 +1945,49 @@ function showModal(html) {
   const box = $('modal-box');
   box.innerHTML = html;
   const d = modal();
-  if (!d.open) d.showModal();          // focus trap + Escape, free
+  if (!d.open) {
+    d.showModal();                     // focus trap + Escape, free
+    history.pushState({ modal: true }, '');
+    modalHasHistory = true;
+  }
   box.scrollTop = 0;
   const first = box.querySelector('input:not([type=hidden]), select, textarea');
   if (first && window.matchMedia('(min-width: 640px)').matches) first.focus();
 }
 function closeModal() {
   const d = modal();
-  if (d.open) d.close();
-  $('modal-box').innerHTML = '';
-  pendingDraft = null;
+  if (d.open) d.close();               // the close handler does the cleanup
 }
 
 let toastTimer;
+let undoFn = null;
+
 function toast(msg, isError) {
   const t = $('toast');
+  undoFn = null;
   t.textContent = msg;
   t.className = 'toast' + (isError ? ' is-error' : '');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.add('hidden'), isError ? 5000 : 2600);
+}
+
+/* Jumping straight to a number — the quick pad, a typed amount, removing a
+   product from a zone — is the change with no obvious way back. Stepping
+   by one already undoes itself with the other button. */
+function toastUndo(msg, fn) {
+  const t = $('toast');
+  undoFn = fn;
+  t.className = 'toast';
+  t.innerHTML = `<span>${esc(msg)}</span><button type="button" class="toast__undo" data-act="undoLast">Undo</button>`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.classList.add('hidden'); undoFn = null; }, 6000);
+}
+
+function runUndo() {
+  const fn = undoFn;
+  undoFn = null;
+  $('toast').classList.add('hidden');
+  if (fn) fn();
 }
 
 /* ============================================================
@@ -1797,7 +2004,8 @@ const ACTIONS = {
   retryQueue:    () => { closeModal(); Q.retryNow(); },
   bump:          d => bump(d.pid, d.zone, Number(d.delta)),
   qtyPad:        d => openQtyPad(d.pid, d.zone),
-  setQty:        d => { setLocalCount(d.pid, d.zone, Number(d.qty)); closeModal(); },
+  setQty:        d => { closeModal(); setQtyWithUndo(d.pid, d.zone, Number(d.qty)); },
+  undoLast:      () => runUndo(),
   removeFromZone:d => removeFromZoneUI(d.pid, d.zone),
   addHere:       d => addHere(d.pid),
   addProduct:    d => openAddProduct(d.zone),
@@ -1853,7 +2061,7 @@ document.addEventListener('submit', e => {
   else if (d.act === 'renameZoneSave') renameZoneSave(d.zone);
   else if (d.act === 'setQtyCustom') {
     const v = $('qty-custom').value;
-    if (v !== '') { setLocalCount(d.pid, d.zone, Number(v)); closeModal(); }
+    if (v !== '') { closeModal(); setQtyWithUndo(d.pid, d.zone, Number(v)); }
   } else if (d.act === 'saveRestockCustom') {
     const v = $('rs-custom').value;
     if (v !== '') saveRestock(d.pid, Number(v));
@@ -1877,8 +2085,14 @@ document.addEventListener('input', e => {
 
 // Click on the backdrop (the dialog itself, outside the sheet) closes it.
 document.addEventListener('click', e => { if (e.target === modal()) closeModal(); });
-modal().addEventListener('cancel', () => { pendingDraft = null; });
-modal().addEventListener('close', () => { $('modal-box').innerHTML = ''; pendingDraft = null; });
+
+/* One cleanup path for every way a sheet can close — button, backdrop,
+   Escape, or the back gesture — so the history entry never leaks. */
+modal().addEventListener('close', () => {
+  $('modal-box').innerHTML = '';
+  pendingDraft = null;
+  if (modalHasHistory) { modalHasHistory = false; ignoreNextPop = true; history.back(); }
+});
 
 // Flush opportunities
 window.addEventListener('online',  () => { renderSaveState(); Q.kick(200); });
@@ -1898,6 +2112,7 @@ Q.load();
 loadSession();
 loadOrdered();
 renderSaveState();
+history.replaceState({ v: S.view, z: S.zoneId }, '');
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

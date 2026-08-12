@@ -89,13 +89,16 @@
         <div id="header-sub" class="appbar__sub"></div>
       </div>
       <div class="appbar__actions">
-        <button type="button" id="save-status" class="savechip" hidden></button>
+        <button type="button" id="save-status" class="savechip" role="status" hidden></button>
         <button type="button" id="btn-refresh" class="icon-btn" aria-label="Refresh data">
           <svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>
         </button>
       </div>
     </header>
-    <main id="view" class="view" aria-live="polite"></main>
+    <!-- The whole view is replaced on navigation, which is too much to
+         announce. A screen name is read from #screen-announce instead. -->
+    <main id="view" class="view"></main>
+    <div id="screen-announce" class="sr-only" aria-live="polite"></div>
   </div>
 
   <nav class="tabbar" aria-label="Main">

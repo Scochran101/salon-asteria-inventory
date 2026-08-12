@@ -408,18 +408,26 @@ button { font: inherit; color: inherit; }
 .stepper:active { background: var(--stone-press); }
 .stepper:disabled { opacity: .3; cursor: default; }
 
+/* Reads as a link, but still meets the 44px touch minimum — the padding
+   does the work, not a visible box. */
 .linkbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tap);
+  padding: 4px 10px;
   background: none;
   border: 0;
-  padding: 4px 2px;
   font-size: var(--fs-sm);
   color: var(--ink-soft);
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
+  flex-shrink: 0;
 }
+.linkbtn:active { opacity: .6; }
 .linkbtn--danger { color: var(--danger); }
-.linkbtn--block  { display: block; width: 100%; text-align: center; padding: 12px 2px; }
+.linkbtn--block  { display: flex; width: 100%; padding: 12px 10px; }
 
 /* Nudge buttons for zone reordering */
 .nudge {
