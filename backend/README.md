@@ -1,11 +1,115 @@
 # Getting the Apps Script into this folder
 
-Right now this folder has documentation but no code. The Apps Script that owns
-the data, the login and every write is only in Google's editor — one window,
-no history, no undo. If someone deletes a function and saves, it is gone.
+The Apps Script that owns the data, the login and every write lives only in
+Google's editor. It is bound to the *Salon Asteria Inventory DB* Sheet, which
+means no outside tool can reach it — not Drive, not an API, not me. Google
+only hands a bound script to a signed-in human in that browser tab.
 
-This is how to fix that. Fifteen minutes, once. Then two minutes each time you
-edit the script.
+So there are two ways to stop it being a single point of failure. Pick one.
+
+| | Effort | What you get |
+|---|---|---|
+| **A. Self-backup** *(recommended)* | ~5 min once | Backs itself up to Drive weekly, forever, untouched by you |
+| **B. Copy into git** | ~3 min once, then 2 min per edit | The code sits here in version control with the front end |
+
+**Read this first, though:** you are less exposed than it sounds. Every time
+you deploy, Apps Script saves an immutable snapshot of the whole project as a
+numbered *version*, and you can roll back to any of them from
+**Deploy → Manage deployments**. That is a real safety net you already have.
+It only fails you if you edit and save without ever deploying, or if the
+project itself is deleted. And because `README.md` documents the full API
+contract and `dev/mockserver.js` implements it, the backend is rebuildable
+from scratch even in the worst case.
+
+That is the honest framing. It is worth doing, not worth panicking about.
+
+---
+
+# Option A — make it back itself up (recommended)
+
+Paste one file in, click run twice, done. After that it copies the entire
+script project into your Drive every Monday and keeps the last 20.
+
+### A1. Turn on the Apps Script API
+
+Go to <https://script.google.com/home/usersettings> and switch
+**Google Apps Script API** to **On**. One toggle, one time, for your whole
+account.
+
+### A2. Add the backup file
+
+1. Open the *Salon Asteria Inventory DB* Sheet → **Extensions → Apps Script**
+2. In the **Files** list, click **+ → Script**
+3. Name it `Backup`
+4. Delete the stub `function myFunction() {}` it creates
+5. Paste in the whole contents of `backend/Backup.gs` from this folder
+6. **Ctrl + S**
+
+### A3. Allow it to see the project
+
+The script needs permission to read itself and write to Drive. Add these to
+the manifest:
+
+1. Click the **gear icon** (Project Settings) → tick **"Show 'appsscript.json'
+   manifest file in editor"**
+2. Click **`< >`** (Editor) → open **`appsscript.json`**
+3. Add an `oauthScopes` block. If one already exists, merge these in rather
+   than replacing it:
+
+```json
+{
+  "timeZone": "America/Chicago",
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/script.projects.readonly",
+    "https://www.googleapis.com/auth/script.external_request",
+    "https://www.googleapis.com/auth/script.scriptapp",
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/spreadsheets"
+  ]
+}
+```
+
+> Keep whatever `timeZone`, `webapp` or other keys are already there. You are
+> only adding `oauthScopes`.
+
+4. **Ctrl + S**
+
+### A4. Run it once
+
+1. In the function dropdown at the top, choose **`backupProjectToDrive`**
+2. Click **Run**
+3. Google will ask for permission — **Review permissions → your account →
+   Advanced → Go to (project name) → Allow**. This is Google warning you about
+   your own script; it is expected.
+4. When it finishes, check Drive for a folder called
+   **Salon Asteria — Script Backups** with a `.json` file in it
+
+If it errors, the message will tell you what to fix — almost always that
+step A1 was missed.
+
+### A5. Put it on a schedule
+
+1. Choose **`scheduleWeeklyBackup`** from the dropdown
+2. Click **Run**
+
+That is it. Monday mornings from now on, permanently, with no involvement
+from you.
+
+### Restoring from a backup
+
+The `.json` file holds every file in the project. Open it, find the `"source"`
+value for the file you want, and paste it back into the editor. Ugly but
+complete — nothing is lost.
+
+---
+
+# Option B — copy it into this folder
+
+Do this as well if you want the backend sitting in version control next to the
+front end, so both halves move together. Fifteen minutes, once, then two
+minutes each time you edit the script.
 
 ---
 
