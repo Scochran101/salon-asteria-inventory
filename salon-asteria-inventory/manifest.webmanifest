@@ -1,0 +1,17 @@
+{
+  "name": "Salon Asteria Inventory",
+  "short_name": "Asteria",
+  "description": "Count the salon, log deliveries, and see what actually got used.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F5F3EA",
+  "theme_color": "#A3B28B",
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "img/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "img/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "img/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
