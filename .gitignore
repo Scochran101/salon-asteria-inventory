@@ -1,0 +1,14 @@
+# OS / editor
+Thumbs.db
+desktop.ini
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# OneDrive sync artefacts
+*.tmp
+~$*
+
+# Node (only if a build step is ever added)
+node_modules/
