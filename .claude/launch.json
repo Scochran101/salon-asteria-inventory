@@ -4,9 +4,7 @@
     {
       "name": "asteria-mock",
       "runtimeExecutable": "node",
-      "runtimeArgs": [
-        "C:\\Users\\cochr\\AppData\\Local\\Temp\\claude\\C--Users-cochr-OneDrive-Documents-Claude-Code-Salon-Asteria\\1f998823-abe7-4409-b85f-31b75ca91f20\\scratchpad\\mockserver.js"
-      ],
+      "runtimeArgs": ["dev/mockserver.js"],
       "port": 8791
     }
   ]
