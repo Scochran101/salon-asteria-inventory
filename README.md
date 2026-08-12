@@ -130,6 +130,27 @@ queue, and stays visible in the pending list.
 
 ---
 
+## Behaviour worth knowing
+
+**Back never leaves the app.** Every screen change and every sheet pushes a
+history entry, so Android's back button and iOS edge-swipe close the sheet,
+then leave the zone, then leave the tab.
+
+**Undo appears where it is needed.** Jumping to an absolute quantity from the
+quick pad, typing one in, or removing a product from a zone all offer Undo in
+the toast for six seconds. Stepping by one does not — the other button already
+undoes it.
+
+**First run asks for one thing at a time.** Until there is a zone and a
+product, the Count tab shows a two-step setup that ticks itself off rather than
+an empty list.
+
+**Marking something ordered clears itself.** Tap an item on the Order list and
+it moves to "On the way". Logging a delivery for it in Restock removes the
+flag — you never have to remember to un-mark it.
+
+---
+
 ## Local development
 
 There is a mock backend for testing without touching the real sheet:
