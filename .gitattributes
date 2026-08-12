@@ -1,0 +1,4 @@
+# Keep LF in the working tree so diffs stay readable across machines.
+* text=auto eol=lf
+*.png binary
+*.ico binary
