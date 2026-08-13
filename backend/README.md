@@ -9,8 +9,11 @@ So there are two ways to stop it being a single point of failure. Pick one.
 
 | | Effort | What you get |
 |---|---|---|
-| **A. Self-backup** *(recommended)* | ~5 min once | Backs itself up to Drive weekly, forever, untouched by you |
+| **C. Separate backup project** *(recommended)* | ~8 min once | Weekly Drive backups of **every** app you own, forever. Never edits the code it protects |
+| **A. Self-backup** | ~5 min once | Same, but for this one script only, and it edits the live backend to do it |
 | **B. Copy into git** | ~3 min once, then 2 min per edit | The code sits here in version control with the front end |
+
+**Start with Option C.** A and B are kept below for reference.
 
 **Read this first, though:** you are less exposed than it sounds. Every time
 you deploy, Apps Script saves an immutable snapshot of the whole project as a
@@ -47,14 +50,26 @@ account.
 
 ### A3. Allow it to see the project
 
-The script needs permission to read itself and write to Drive. Add these to
-the manifest:
+> ### Read this before editing the manifest
+>
+> If `appsscript.json` has **no** `oauthScopes` key today, Apps Script is
+> working out the permissions automatically by reading your code. **The moment
+> you add an explicit list, that stops** — only what you list will apply.
+>
+> Miss one your backend already needs and it breaks the next time you deploy.
+> So start by finding out what it uses now:
+>
+> 1. Click the **ℹ️ (Overview)** icon in the left sidebar
+> 2. Scroll to **Project OAuth Scopes** and note every line
+>
+> Your list in step 3 must contain **all of those**, plus the new ones.
 
 1. Click the **gear icon** (Project Settings) → tick **"Show 'appsscript.json'
    manifest file in editor"**
 2. Click **`< >`** (Editor) → open **`appsscript.json`**
-3. Add an `oauthScopes` block. If one already exists, merge these in rather
-   than replacing it:
+3. Add an `oauthScopes` block containing everything from Overview plus these
+   four. If a key like `timeZone` or `webapp` is already there, leave it — you
+   are only adding `oauthScopes`:
 
 ```json
 {
@@ -71,10 +86,11 @@ the manifest:
 }
 ```
 
-> Keep whatever `timeZone`, `webapp` or other keys are already there. You are
-> only adding `oauthScopes`.
-
 4. **Ctrl + S**
+
+> **Safer alternative:** put the backup in its own separate script project
+> instead, so the production backend is never edited at all. It can back up
+> any number of scripts — including this one — by ID. See *Option C* below.
 
 ### A4. Run it once
 
@@ -102,6 +118,101 @@ from you.
 The `.json` file holds every file in the project. Open it, find the `"source"`
 value for the file you want, and paste it back into the editor. Ugly but
 complete — nothing is lost.
+
+---
+
+# Option C — a separate backup project (safest, and covers every app)
+
+The backup lives in its own script project, so nothing you depend on is ever
+edited. It reads other projects by ID through the Apps Script API and copies
+them to Drive. Add as many projects as you like — this is the one to use if
+you want every app you have built covered, not just Asteria.
+
+`backend/Backup.gs` in this folder is the file to paste. It already lists two
+of your standalone projects; you only need to fill in Asteria's ID.
+
+### C1. Get the Asteria script ID
+
+1. Open the **Salon Asteria Inventory DB** Sheet
+2. **Extensions → Apps Script**
+3. Click the **gear icon** (Project Settings) in the left sidebar
+4. Under **IDs**, copy the **Script ID** (a long string, ~57 characters)
+
+Leave this tab open — you are done with it after this step.
+
+### C2. Create the backup project
+
+1. Go to <https://script.google.com/home>
+2. Click **New project** (top left)
+3. Click the project name at the top — currently *Untitled project* — and
+   rename it **Apps Script Backups**
+
+### C3. Paste the code in
+
+1. In the **Files** list, the editor has created `Code.gs` with a stub
+   `function myFunction() {}`
+2. Select all of it (**Ctrl + A**) and paste in the entire contents of
+   `backend/Backup.gs`
+3. Near the top, replace `PASTE_ASTERIA_SCRIPT_ID_HERE` with the Script ID
+   from step C1 — keep the quotes around it
+4. **Ctrl + S**
+
+### C4. Add the permissions
+
+Because this project is brand new, there is nothing to break — the list below
+is complete for this code.
+
+1. **Gear icon** (Project Settings) → tick **"Show 'appsscript.json' manifest
+   file in editor"**
+2. Click **`< >`** (Editor) → open **`appsscript.json`**
+3. Replace everything in it with:
+
+```json
+{
+  "timeZone": "America/Chicago",
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/script.projects.readonly",
+    "https://www.googleapis.com/auth/script.external_request",
+    "https://www.googleapis.com/auth/script.scriptapp",
+    "https://www.googleapis.com/auth/drive"
+  ]
+}
+```
+
+4. **Ctrl + S**
+
+### C5. Run it twice
+
+1. Pick **`backupAllProjects`** from the function dropdown → **Run**
+2. Approve the permission prompt — **Review permissions → your account →
+   Advanced → Go to Apps Script Backups (unsafe) → Allow**. That warning is
+   Google telling you the script is not verified. It is yours; it is fine.
+3. Check the **Execution log** at the bottom. You want
+   `Backed up: Salon Asteria Inventory, ...`
+4. Pick **`scheduleWeeklyBackup`** → **Run**
+
+Done permanently. Check Drive for a folder called **Apps Script Backups** with
+a subfolder per project.
+
+### Adding another app later
+
+Open the backup project, add a line to `TARGETS`, save. Nothing else:
+
+```js
+{ name: 'Some Other App', scriptId: '1AbC...' },
+```
+
+### What it does on each run
+
+Fetches each project's full source, and writes it to
+`Apps Script Backups / <project name> / 2026-08-17 0400.json`. If nothing has
+changed since the last copy it skips writing, so the folder stays meaningful
+rather than filling with twenty identical files. Keeps the most recent 20.
+
+To restore: open the `.json`, find the `"source"` value for the file you want,
+paste it back into the editor.
 
 ---
 
