@@ -8,7 +8,7 @@
  *
  * Bump CACHE whenever a shell file changes.
  * ============================================================ */
-const CACHE = 'asteria-shell-v3';
+const CACHE = 'asteria-shell-v4';
 
 const SHELL = [
   './',

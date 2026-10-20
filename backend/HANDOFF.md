@@ -1,5 +1,11 @@
 # Backend handoff — Apps Script changes still outstanding
 
+> **Status, October 2026:** the backend moved to Neon (`api/index.js`), and
+> items 1 to 4 below are built there and tested: retry-safe creates with
+> `clientId`, clearing a price, login as a POST with a lock after 10 wrong
+> PINs, and `usageHistory`. Item 5 (batched counts) and the two ideas at the
+> end are not built. This file is kept as the record of what was asked for.
+
 Everything in the review that could be fixed in the client is done. Four things
 need the Apps Script, because they depend on data or behaviour the browser
 cannot reach. They are listed in the order I'd do them.

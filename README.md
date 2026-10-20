@@ -4,52 +4,61 @@ A phone-first inventory app for Salon Asteria. You walk the salon zone by zone,
 count what's on the shelf, log deliveries as they arrive, and the app works out
 what actually got used.
 
-Data lives in a Google Sheet. The front end is static files — no build step, no
-dependencies, no toolchain to rot.
+Data lives in a Neon Postgres database behind one Vercel Function,
+`api/index.js`, which serves `/api`. The front end is static files with no
+build step. Until October 2026 the data lived in a Google Sheet behind an
+Apps Script; `backend/Code.gs` is that script, kept as the reference the new
+backend was tested against.
 
 ---
 
 ## Files
 
 ```
-salon-asteria-inventory/
-  index.html            markup + the SVG icon sprite
-  app.css               all styles (replaces the old Tailwind CDN)
-  app.js                all logic
-  sw.js                 service worker — caches the shell, never the data
-  manifest.webmanifest  installable-app metadata
-  img/                  logos and home-screen icons
-backend/
-  HANDOFF.md            Apps Script changes still outstanding
+index.html, app.css, app.js   the app (markup, styles, all logic)
+sw.js                         service worker: caches the shell, never /api
+manifest.webmanifest, img/    installable-app metadata, logos, icons
+api/index.js                  the backend: every action, on Neon
+db/schema.sql                 the tables (one per old Sheet tab)
+lib/                          the Sheet-to-table map, the export
+scripts/                      import / verify / export / lock, local dev server
+test/parity.mjs               new backend vs the Apps Script, side by side
+test/cutover.mjs              export round trip and importer lock
+backend/                      the old Apps Script and its notes
+dev/mockserver.js             an in-memory mock backend
 ```
 
 ## Deploying
 
-Upload the contents of `salon-asteria-inventory/` to any static host, keeping
-the folder structure. Three rules:
+Vercel project `salon-asteria-inventory` (team I-MGMT) builds from GitHub
+`Scochran101/salon-asteria-inventory`: a push to `main` goes live, any other
+branch gets a private preview. `.vercelignore` keeps everything but the app
+and `api/` off the public site.
 
-1. **Serve over HTTPS.** The service worker will not register otherwise
-   (`localhost` is exempt for testing).
-2. **Keep `sw.js` at the site root of the app**, alongside `index.html`. Its
-   scope is the folder it sits in.
-3. **After changing `app.css`, `app.js` or `index.html`, bump `CACHE` in
-   `sw.js`** (`asteria-shell-v2` → `v3`). Otherwise phones keep serving the
-   cached shell and will not see the update.
+Environment variables in Vercel:
 
-The backend URL is `SCRIPT_URL` at the top of `app.js`.
+- `DATABASE_URL` and friends: set by the Neon integration (database
+  `salon-asteria-db`).
+- `APP_PASSWORD`: the shared PIN. Set it in Vercel (Settings > Environment
+  Variables), never in code. Changing it signs nobody out.
+
+**After changing `app.css`, `app.js` or `index.html`, bump `CACHE` in
+`sw.js`** (`asteria-shell-v4` to `v5`). Otherwise phones keep serving the
+cached shell and will not see the update.
 
 ---
 
-## The sheet
+## The data
 
-The Apps Script web app reads and writes these tabs.
+One table per old Sheet tab, with the same columns (snake_case in the
+database; the API still answers with the Sheet's headers). See `db/schema.sql`.
 
 **Products**
 
 | Column | Notes |
 |---|---|
 | `ProductID` | unique, server-assigned |
-| `Category` | free text. The app sorts the six known ones first and shows anything else after — it no longer hides unknown categories |
+| `Category` | free text. The app sorts the six known ones first and shows anything else after |
 | `Brand`, `Line`, `SubType`, `Shade` | the display name is built from these |
 | `Par` | reorder level. Below this, it lands on the Order list |
 | `Price` | optional. Drives the refill estimate and cost of goods used |
@@ -57,10 +66,14 @@ The Apps Script web app reads and writes these tabs.
 | `Notes` | free text |
 | `Active` | `Y` or blank. Blank archives it everywhere |
 
-**Zones** — `ZoneID`, `Name`, `SortOrder`, `Active`
-**Counts** — `ProductID`, `ZoneID`, `Qty`, `LastUpdated`
-**Snapshots** — `SnapshotID`, `Date`, `Status` (`closed`), `Notes`
-**Restocks** — `RestockID`, `Date`, `ProductID`, `Qty`, `Note`
+**Zones**: `ZoneID`, `Name`, `SortOrder`, `Active`
+**ZoneCounts**: `ProductID`, `ZoneID`, `Qty`, `LastUpdated`
+**Snapshots**: `SnapshotID`, `Date`, `Status` (`closed`), `Notes`
+**SnapshotLines**: `SnapshotID`, `ProductID`, `ZoneID`, `Qty` (the counts each snapshot froze)
+**Restocks**: `RestockID`, `Date`, `ProductID`, `Qty`, `Note`
+
+Products, zones and restocks also keep the `clientId` the app sent, so a
+retried write finds the row it already made.
 
 Quantities are stored to the nearest half, so half a tube is `0.5` and displays
 as `½`.
@@ -69,40 +82,39 @@ as `½`.
 
 ## API contract
 
-`GET ?action=…&token=…`
+`GET /api?action=…&token=…`
 
 | Action | Returns |
 |---|---|
-| `login` (`&password=`) | `{success, token}` or `{success:false}` |
-| `boot` | `{products, zones, counts, snapshots, restocks}` |
-| `report` | `{ready, previous:{date}, current:{date}, rows:[…]}` or `{ready:false, message}` |
+| `ping` (no token) | `{ok, message, version}` |
+| `login` (`&password=`) | `{success, token}`, `{success:false}`, or `{success:false, locked:true}` |
+| `boot` | `{products, zones, counts, snapshots, restocks}` (the last 50 restocks) |
+| `report` | `{ready, previous:{id,date}, current:{id,date}, rows:[…]}` or `{ready:false, message}` |
+| `usageHistory` (`&periods=`, default 8) | `{ready, periods:[{from, to, rows:[{productId, usage, restocked, label}]}]}` |
 
-`POST {token, action, data}`
+`POST /api` with `{token, action, data}`
 
 | Action | `data` | Returns |
 |---|---|---|
+| `login` (no token) | `password` | as the GET login. This is what the app uses, so the PIN stays out of URLs |
 | `setCount` | `productId, zoneId, qty` | `{ok}` |
 | `removeFromZone` | `productId, zoneId` | `{ok}` |
-| `addProduct` | `clientId, category, brand, line, subType, shade, price, par, notes, zoneId, qty` | `{productId}` |
+| `addProduct` | `clientId, category, brand, line, subType, shade, price, par, notes, zoneId, qty` | `{ok, productId}` |
 | `updateProduct` | `productId` + any of `category, brand, line, subType, shade, par, notes, verify, active, price` | `{ok}` |
-| `addZone` | `clientId, name, sortOrder` | `{zoneId}` |
+| `addZone` | `clientId, name` | `{ok, zoneId}` |
 | `updateZone` | `zoneId` + any of `name, sortOrder, active` | `{ok}` |
-| `restock` | `clientId, productId, qty, date` | `{restockId}` |
+| `restock` | `clientId, productId, qty, note` | `{ok, restockId}` |
 | `deleteRestock` | `restockId` | `{ok}` |
-| `finishCount` | `notes` | `{snapshotId}` |
+| `finishCount` | `notes` | `{ok, snapshotId}` |
 
-Any response may be `{error:"AUTH"}`, which signs the user out.
+Any response may be `{error:"AUTH"}`, which signs the user out; a refused
+write answers `{error:"<reason>"}`.
 
-### Two contract notes the backend must honour
-
-- **`clientId` is an idempotency key.** Writes are retried after a failure, and
-  a 500 does not tell the client whether the write landed. `addProduct`,
-  `addZone` and `restock` must return the existing record if they see a
-  `clientId` they have already stored, rather than creating a second one. See
-  `backend/HANDOFF.md`.
-- **`price: null` means clear it.** Absent means leave it alone. The old
-  behaviour — omitting the key when the field was blank — made it impossible to
-  remove a wrong price.
+- **`clientId` makes a create safe to retry.** `addProduct`, `addZone` and
+  `restock` return the row a `clientId` already made instead of a second one.
+- **`price: null` clears a price.** Absent leaves it alone.
+- **Login locks for 15 minutes after 10 wrong PINs in 15 minutes**, for
+  everyone. Phones already signed in keep working.
 
 ---
 
@@ -153,15 +165,23 @@ flag — you never have to remember to un-mark it.
 
 ## Local development
 
-There is a mock backend for testing without touching the real sheet:
+Against the real database (copy `.env.local` from `vercel env pull`, put a
+made-up `APP_PASSWORD` in `.env.test`):
 
 ```bash
-node dev/mockserver.js
+node --env-file=.env.local --env-file=.env.test scripts/dev-server.mjs
 ```
 
-It serves the real files with `SCRIPT_URL` rewritten to itself, implements the
-contract above in memory, and exposes `/_control?fail=1` to simulate an outage
-so the queue can be exercised. The PIN is `1234`.
+Without a database, `node dev/mockserver.js` serves the app over an in-memory
+mock (PIN `1234`; `/_control?fail=1` simulates an outage).
+
+Tests (both reload the database from the export afterwards, and must never
+run after the switch):
+
+```bash
+npm run test:parity -- "<Sheet export .xlsx>"
+node --env-file=.env.local test/cutover.mjs "<Sheet export .xlsx>"
+```
 
 ---
 
@@ -169,8 +189,9 @@ so the queue can be exercised. The PIN is `1234`.
 
 - **The "ordered" state on the Order list is per-device.** It lives in
   `localStorage`, so marking something ordered on the front-desk iPad will not
-  show on a stylist's phone. Moving it to the sheet is a small backend change.
+  show on a stylist's phone. Moving it to the database is a small backend change.
 - **One shared PIN, so counts are not attributed to a person.**
-- **The usage report compares the last two snapshots only.** Trends across more
-  periods need the snapshot line data, which the backend does not currently
-  expose — see `backend/HANDOFF.md`.
+- **Trend lines on the report appear from the third finished count.** Fewer
+  periods are not a trend.
+- **Archived products and hidden zones have no in-app way back.** Ask Steven;
+  it is one database change.

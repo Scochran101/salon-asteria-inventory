@@ -3,7 +3,10 @@
   "scripts": {
     "db:schema": "node --env-file=.env.local scripts/db-schema.mjs",
     "db:import": "node --env-file=.env.local scripts/import-sheet.mjs",
-    "db:verify": "node --env-file=.env.local scripts/verify-import.mjs"
+    "db:verify": "node --env-file=.env.local scripts/verify-import.mjs",
+    "db:export": "node --env-file=.env.local scripts/export-sheet.mjs",
+    "db:lock": "node --env-file=.env.local scripts/lock-import.mjs",
+    "test:parity": "node --env-file=.env.local test/parity.mjs"
   },
   "type": "module",
   "dependencies": {
