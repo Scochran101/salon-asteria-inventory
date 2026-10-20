@@ -1,0 +1,14 @@
+{
+  "name": "salon-asteria-inventory",
+  "scripts": {
+    "db:schema": "node --env-file=.env.local scripts/db-schema.mjs",
+    "db:import": "node --env-file=.env.local scripts/import-sheet.mjs",
+    "db:verify": "node --env-file=.env.local scripts/verify-import.mjs"
+  },
+  "type": "module",
+  "dependencies": {
+    "@neondatabase/serverless": "^1.2.0",
+    "exceljs": "^4.4.0"
+  },
+  "private": true
+}
