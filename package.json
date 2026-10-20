@@ -7,8 +7,10 @@
   },
   "type": "module",
   "dependencies": {
-    "@neondatabase/serverless": "^1.2.0",
-    "exceljs": "^4.4.0"
+    "@neondatabase/serverless": "^1.2.0"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "exceljs": "^4.4.0"
+  }
 }

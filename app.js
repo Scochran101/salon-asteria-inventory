@@ -1,6 +1,6 @@
 /* ============================================================
  * SALON ASTERIA INVENTORY — FRONT END
- * Backend: Google Apps Script Web App (see SCRIPT_URL)
+ * Backend: /api, a Vercel Function on Neon Postgres (see api/index.js)
  *
  * Writes never go straight to the network. Every mutation is applied
  * locally, appended to a durable queue in localStorage, and flushed
@@ -9,7 +9,7 @@
  * ============================================================ */
 'use strict';
 
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyMzTwGQCjIyJZ5q6bo2-kmL_wrdVpgzEJM7C6izC8lsdBzv5gF6iXuwcJKL793EZ_2/exec';
+const SCRIPT_URL = '/api';
 
 /* Known categories order the Order list and seed the pickers, but they no
    longer decide what is allowed to exist — anything present in the sheet
@@ -35,6 +35,7 @@ let S = {
   touched: {},          // "productId|zoneId" -> true, for this counting session
   ordered: {},          // productId -> ISO date marked as ordered
   report: null,
+  history: null,        // usageHistory: units used per counting period, for the report's trend lines
   flushing: false,
   savedAt: 0
 };
@@ -406,16 +407,19 @@ function pinBack() {
 }
 async function submitPin() {
   try {
-    // NOTE: the PIN still travels as a query parameter, which lands it in the
-    // Apps Script execution log. Moving it into the POST body needs a matching
-    // backend change — see backend/HANDOFF.md. Do not change this alone.
-    const res = await fetch(SCRIPT_URL + '?action=login&password=' + encodeURIComponent(pin));
+    const res = await fetch(SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'login', data: { password: pin } })
+    });
     const out = await res.json();
     if (out.success) {
       S.token = out.token;
       localStorage.setItem(LS.token, out.token);
       $('pin-screen').classList.add('hidden');
       boot();
+    } else if (out.locked) {
+      $('pin-error').textContent = 'Too many tries. Wait 15 minutes.';
+      pin = ''; renderPinDots();
     } else {
       $('pin-error').textContent = 'Wrong PIN — try again';
       pin = ''; renderPinDots();
@@ -506,7 +510,7 @@ async function boot() {
       $('app').classList.remove('hidden');
       render();
       toast(navigator.onLine
-        ? 'Couldn’t reach the sheet — showing the copy from ' + fmtWhen(cachedAt)
+        ? 'Couldn’t reach the server — showing the copy from ' + fmtWhen(cachedAt)
         : 'Offline — showing the copy from ' + fmtWhen(cachedAt), true);
     } else {
       $('app').classList.remove('hidden');
@@ -1254,7 +1258,7 @@ function archiveProduct(pid) {
   const p = S.products.find(p => p.ProductID === pid);
   showModal(`
     <div class="modal__title" id="modal-title">Archive ${esc(prodName(p))}?</div>
-    <div class="modal__sub">It disappears from counting, browsing and the order list. Its history stays in the sheet, and you can bring it back from there.</div>
+    <div class="modal__sub">It disappears from counting, browsing and the order list. Its history is kept, and Steven can bring it back.</div>
     <div class="modal__actions">
       <button type="button" class="btn btn--ghost" data-act="closeModal">Keep it</button>
       <button type="button" class="btn btn--dark" data-act="archiveProductConfirm" data-pid="${esc(pid)}">Archive</button>
@@ -1611,7 +1615,9 @@ function viewReportLoading() {
 
 async function loadReport() {
   try {
-    S.report = await apiGet('report');
+    const [report, history] = await Promise.all([apiGet('report'), apiGet('usageHistory')]);
+    S.report = report;
+    S.history = history;
     $('view').innerHTML = viewReport();
   } catch (e) {
     Log.add('report', e);
@@ -1621,7 +1627,7 @@ async function loadReport() {
         icon: 'chart',
         title: 'Couldn’t load the report',
         body: navigator.onLine
-          ? 'The sheet didn’t answer. This one needs a live connection — everything else still works.'
+          ? 'The server didn’t answer. This one needs a live connection — everything else still works.'
           : 'You’re offline. The report is worked out on the server, so it needs a connection.',
         action: navigator.onLine
           ? `<button type="button" class="btn btn--ghost btn--sm" data-act="go" data-view="report">Try again</button>` : ''
@@ -1630,15 +1636,25 @@ async function loadReport() {
   }
 }
 
-/* Price lookup by reconstructed full name, so cost of goods used works
-   without any backend change. Unmatched rows are excluded and counted. */
+/* Price by product ID. Unpriced rows are excluded and counted. */
 function priceIndex() {
   const ix = {};
-  activeProducts().forEach(p => {
-    const k = prodFull(p).toLowerCase().trim();
-    if (k) ix[k] = Number(p.Price) || 0;
-  });
+  S.products.forEach(p => { ix[p.ProductID] = Number(p.Price) || 0; });
   return ix;
+}
+
+/* Units used in each counting period, oldest first, as a small line.
+   Drawn once there are three periods; fewer is not a trend. */
+function sparkFor(productId) {
+  const periods = (S.history && S.history.periods) || [];
+  if (periods.length < 3) return '';
+  const vals = periods.map(per => Math.max(0, (per.rows.find(r => r.productId === productId) || {}).usage || 0));
+  const max = Math.max(...vals) || 1;
+  const pts = vals.map((v, i) => [(i / (vals.length - 1)) * 60 + 1, 22 - (v / max) * 20]);
+  const [lx, ly] = pts[pts.length - 1];
+  return `<svg class="spark" viewBox="0 0 62 24" aria-hidden="true">
+    <polyline class="spark__line" points="${pts.map(p => p.map(n => n.toFixed(1)).join(',')).join(' ')}"/>
+    <circle class="spark__dot" cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="2"/></svg>`;
 }
 
 function viewReport() {
@@ -1669,8 +1685,7 @@ function viewReport() {
   const ix = priceIndex();
   let cost = 0, pricedRows = 0;
   used.forEach(x => {
-    const k = [x.brand, x.line, x.subType, x.shade].filter(Boolean).join(' ').toLowerCase().trim();
-    const price = ix[k];
+    const price = ix[x.productId];
     if (price > 0) { cost += price * x.usage; pricedRows++; }
   });
 
@@ -1704,7 +1719,7 @@ function viewReport() {
             <div class="row__title"><span>${esc([x.shade, x.subType, x.line].filter(Boolean)[0] || x.brand)}</span></div>
             <div class="row__sub">${esc([x.brand, x.line, x.shade ? x.subType : ''].filter(Boolean).join(' · '))}</div>
           </div>
-          <div class="row__meta"><div class="row__big">−${fmtQty(x.usage)}</div>
+          <div class="row__meta">${sparkFor(x.productId)}<div class="row__big">−${fmtQty(x.usage)}</div>
             <div class="row__sub">${esc(x.label || '')}${x.restocked ? ' · +' + fmtQty(x.restocked) + ' recvd' : ''}</div></div>
         </div>`).join('')}</div>` : ''}
 
@@ -1715,7 +1730,7 @@ function viewReport() {
             <div class="row__title"><span>${esc([x.shade, x.subType, x.line].filter(Boolean)[0] || x.brand)}</span></div>
             <div class="row__sub">${esc([x.brand, x.line, x.shade ? x.subType : ''].filter(Boolean).join(' · '))}</div>
           </div>
-          <div class="row__meta"><div class="row__big">−${fmtQty(x.usage)}</div>
+          <div class="row__meta">${sparkFor(x.productId)}<div class="row__big">−${fmtQty(x.usage)}</div>
             <div class="row__sub">${esc(x.label || '')}${x.restocked ? ' · +' + fmtQty(x.restocked) + ' recvd' : ''}</div></div>
         </div>`).join('')}</div>` : ''}
 
@@ -1755,7 +1770,7 @@ function viewMore() {
       <button type="button" class="menu__item menu__item--danger" data-act="logout">
         ${icon('out')}<span>Sign out</span></button>
     </div>
-    <p class="screen-blurb center" style="margin-top:24px">Salon Asteria Inventory · data lives in Google Sheets</p>`
+    <p class="screen-blurb center" style="margin-top:24px">Salon Asteria Inventory</p>`
   });
 }
 
@@ -1908,8 +1923,8 @@ function hideZone(zid) {
   showModal(`
     <div class="modal__title" id="modal-title">Hide ${esc(zoneName(zid))}?</div>
     <div class="modal__sub">${n
-      ? `This zone still has ${n} ${n === 1 ? 'product' : 'products'} in it. They keep their counts, but the zone drops off the walk. You can bring it back from the Zones tab of the sheet.`
-      : 'It drops off the walk. You can bring it back from the Zones tab of the sheet.'}</div>
+      ? `This zone still has ${n} ${n === 1 ? 'product' : 'products'} in it. They keep their counts, but the zone drops off the walk. Steven can bring it back.`
+      : 'It drops off the walk. Steven can bring it back.'}</div>
     <div class="modal__actions">
       <button type="button" class="btn btn--ghost" data-act="closeModal">Keep it</button>
       <button type="button" class="btn btn--dark" data-act="hideZoneConfirm" data-zone="${esc(zid)}">Hide zone</button>

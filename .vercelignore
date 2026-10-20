@@ -1,0 +1,9 @@
+backend
+dev
+db
+scripts
+lib
+test
+README.md
+.claude
+.env*

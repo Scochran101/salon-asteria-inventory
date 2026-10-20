@@ -5,7 +5,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const APP = path.join(__dirname, '..', 'salon-asteria-inventory');
+const APP = path.join(__dirname, '..');
 const PORT = 8791;
 
 let failWrites = false;   // toggled via /_control?fail=1 to test the queue
