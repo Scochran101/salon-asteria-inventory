@@ -1,9 +1,9 @@
 // Writes the whole database to an .xlsx laid out like the old Google Sheet
-// (see lib/export-workbook.mjs).
+// (see api/_lib/export-workbook.mjs).
 // Usage: npm run db:export -- "C:\path\to\Salon Asteria export.xlsx"
 import { writeFile } from 'node:fs/promises';
 import { neon } from '@neondatabase/serverless';
-import { buildWorkbook } from '../lib/export-workbook.mjs';
+import { buildWorkbook } from '../api/_lib/export-workbook.mjs';
 
 const file = process.argv[2];
 if (!file) {

@@ -9,8 +9,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { neon } from '@neondatabase/serverless';
-import { TABS } from '../lib/sheet-tabs.mjs';
-import { buildWorkbook } from '../lib/export-workbook.mjs';
+import { TABS } from '../api/_lib/sheet-tabs.mjs';
+import { buildWorkbook } from '../api/_lib/export-workbook.mjs';
 
 const file = process.argv[2];
 if (!file) {

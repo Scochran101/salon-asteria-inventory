@@ -22,11 +22,15 @@
  */
 import { randomUUID } from 'node:crypto';
 import { neon } from '@neondatabase/serverless';
+import { put } from '@vercel/blob';
+import { buildWorkbook } from './_lib/export-workbook.mjs';
 
 const sql = neon(process.env.DATABASE_URL);
 const VERSION = 1;
 const SESSION_DAYS = 30;
 const LOGIN_LIMIT = 10;   // wrong PINs within 15 minutes before login locks for 15 minutes
+const TIMEZONE = 'America/Chicago';
+const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 // ===========================================================================
 //  ENTRY POINT
@@ -36,7 +40,9 @@ export default {
   async fetch(request) {
     try {
       if (request.method === 'POST') return jsonOut(await doPost(JSON.parse(await request.text())));
-      return jsonOut(await doGet(Object.fromEntries(new URL(request.url).searchParams)));
+      const params = Object.fromEntries(new URL(request.url).searchParams);
+      if (params.action === 'nightlyBackup') return await nightlyBackup(request);
+      return jsonOut(await doGet(params));
     } catch (err) {
       return jsonOut({ error: err.message });
     }
@@ -353,8 +359,37 @@ async function finishCount(d) {
 }
 
 // ===========================================================================
+//  NIGHTLY BACKUP (Vercel Cron, see vercel.json)
+// ===========================================================================
+
+/** The whole database as an .xlsx in the old Sheet's layout, kept in the
+ *  PRIVATE backups Blob store as "backups/Salon Asteria YYYY-MM-DD.xlsx".
+ *  Only the cron's CRON_SECRET may run it. A failure answers HTTP 500 so the
+ *  cron log in Vercel shows it. */
+async function nightlyBackup(request) {
+  if (!process.env.CRON_SECRET || request.headers.get('authorization') !== 'Bearer ' + process.env.CRON_SECRET)
+    return jsonOut({ ok: false, error: 'Not allowed.' }, 401);
+  const pathname = `backups/Salon Asteria ${localDay(new Date())}.xlsx`;
+  try {
+    // put() would otherwise fall back to BLOB_READ_WRITE_TOKEN, which could
+    // belong to a public store one day. Refuse rather than risk it.
+    if (!process.env.BACKUP_BLOB_READ_WRITE_TOKEN) throw new Error('Backup storage is not set up yet.');
+    const blob = await put(pathname, await buildWorkbook(sql), {
+      access: 'private', token: process.env.BACKUP_BLOB_READ_WRITE_TOKEN,
+      addRandomSuffix: false, allowOverwrite: true, contentType: XLSX,
+    });
+    return jsonOut({ ok: true, pathname: blob.pathname });
+  } catch (err) {
+    return jsonOut({ ok: false, error: err.message }, 500);
+  }
+}
+
+// ===========================================================================
 //  HELPERS
 // ===========================================================================
+
+const DAY_FORMAT = new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit' });
+const localDay = d => DAY_FORMAT.format(d);
 
 /** Rounds a quantity to the nearest half unit and blocks negatives. */
 function cleanQty(q) {
@@ -372,8 +407,9 @@ function toPrice(v) {
 const text = v => (v === null || v === undefined ? '' : String(v));
 const nowIso = () => new Date().toISOString();
 
-function jsonOut(obj) {
+function jsonOut(obj, status = 200) {
   return new Response(JSON.stringify(obj), {
+    status,
     headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
   });
 }

@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import ExcelJS from 'exceljs';
 import { neon } from '@neondatabase/serverless';
-import { TABS, readTab, sheetText } from '../lib/sheet-tabs.mjs';
+import { TABS, readTab, sheetText } from '../api/_lib/sheet-tabs.mjs';
 
 const file = process.argv[2];
 if (!file) {

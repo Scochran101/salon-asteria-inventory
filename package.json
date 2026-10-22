@@ -10,10 +10,9 @@
   },
   "type": "module",
   "dependencies": {
-    "@neondatabase/serverless": "^1.2.0"
-  },
-  "private": true,
-  "devDependencies": {
+    "@neondatabase/serverless": "^1.2.0",
+    "@vercel/blob": "^2.8.2",
     "exceljs": "^4.4.0"
-  }
+  },
+  "private": true
 }

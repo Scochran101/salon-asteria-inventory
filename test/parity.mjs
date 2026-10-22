@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import ExcelJS from 'exceljs';
 import { neon } from '@neondatabase/serverless';
-import { TABS, sheetText, isTypedCodeDate } from '../lib/sheet-tabs.mjs';
+import { TABS, sheetText, isTypedCodeDate } from '../api/_lib/sheet-tabs.mjs';
 
 const file = process.argv[2];
 if (!file) {

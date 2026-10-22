@@ -8,7 +8,7 @@ import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import ExcelJS from 'exceljs';
 import { Client } from '@neondatabase/serverless';
-import { TABS, SKIPPED_TABS, SHEET_TIMEZONE, readTab, sheetText, isTypedCodeDate } from '../lib/sheet-tabs.mjs';
+import { TABS, SKIPPED_TABS, SHEET_TIMEZONE, readTab, sheetText, isTypedCodeDate } from '../api/_lib/sheet-tabs.mjs';
 
 const file = process.argv[2];
 if (!file) {
@@ -52,7 +52,7 @@ await wb.xlsx.load(buf);
 
 const known = new Set([...TABS.map(t => t.tab), ...Object.keys(SKIPPED_TABS)]);
 for (const ws of wb.worksheets) {
-  if (!known.has(ws.name)) throw new Error(`Tab "${ws.name}" is not mapped in lib/sheet-tabs.mjs.`);
+  if (!known.has(ws.name)) throw new Error(`Tab "${ws.name}" is not mapped in api/_lib/sheet-tabs.mjs.`);
 }
 for (const name of Object.keys(SKIPPED_TABS)) {
   const ws = wb.getWorksheet(name);

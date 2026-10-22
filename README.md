@@ -20,7 +20,7 @@ sw.js                         service worker: caches the shell, never /api
 manifest.webmanifest, img/    installable-app metadata, logos, icons
 api/index.js                  the backend: every action, on Neon
 db/schema.sql                 the tables (one per old Sheet tab)
-lib/                          the Sheet-to-table map, the export
+api/_lib/                     the Sheet-to-table map, the export
 scripts/                      import / verify / export / lock, local dev server
 test/parity.mjs               new backend vs the Apps Script, side by side
 test/cutover.mjs              export round trip and importer lock
@@ -41,6 +41,11 @@ Environment variables in Vercel:
   `salon-asteria-db`).
 - `APP_PASSWORD`: the shared PIN. Set it in Vercel (Settings > Environment
   Variables), never in code. Changing it signs nobody out.
+- `BACKUP_BLOB_READ_WRITE_TOKEN`: the private store `salon-asteria-backups`.
+  Every night at 9:00 UTC (3 or 4 AM Central) a cron job saves the whole
+  database there as `backups/Salon Asteria YYYY-MM-DD.xlsx`, in the Sheet's
+  layout.
+- `CRON_SECRET`: lets only that cron job run the backup.
 
 **After changing `app.css`, `app.js` or `index.html`, bump `CACHE` in
 `sw.js`** (`asteria-shell-v4` to `v5`). Otherwise phones keep serving the
